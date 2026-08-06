@@ -129,6 +129,10 @@ The dumper does **not** modify RPCS3 or game memory.
 
 For implementation details, RSX/FIFO research, CLI switches and known limitations, see [TECHNICAL.md](TECHNICAL.md).
 
+## Credits
+
+Development assistance provided by OpenAI Codex.
+
 ## Disclaimer
 
 This project is intended for research, preservation and debugging. It is not affiliated with or endorsed by RPCS3, Sony, or the original game developers/publishers.
