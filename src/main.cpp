@@ -541,36 +541,121 @@ static std::uint32_t packed_pitch_for(std::uint8_t format, std::uint16_t width)
     }
 }
 
-static std::uint32_t find_control3_pitch_before(const std::uint8_t* data, std::size_t position,
-                                                std::uint8_t unit, std::uint8_t format,
-                                                std::uint16_t width)
+static std::uint32_t find_control3_pitch_for_texture(const std::uint8_t* data, std::size_t data_size,
+                                                     std::size_t position, std::uint8_t unit,
+                                                     std::uint8_t format, std::uint16_t width)
 {
     // NV4097_SET_TEXTURE_CONTROL3 is method 0x1840. The 16 fragment units
     // occupy consecutive 32-bit methods here (0x1840 + unit*4). RPCS3 reads
     // the low 20 bits of this register as the texture pitch.
-    if (!(format & 0x20u) || position < 4) return 0; // Pitch is meaningful for linear textures.
+    if (!(format & 0x20u) || position + 4 > data_size) return 0; // Pitch is meaningful for linear textures.
 
     const std::uint32_t target = 0x1840u + static_cast<std::uint32_t>(unit) * 4u;
+    const std::uint32_t texture_offset = 0x1a00u + static_cast<std::uint32_t>(unit) * 0x20u;
     const std::uint32_t minimum = packed_pitch_for(format, width);
     constexpr std::uint32_t non_increment = 0x40000000u;
-    const std::size_t max_back = std::min<std::size_t>(position, 64 * 1024);
 
-    for (std::size_t delta = 4; delta <= max_back; delta += 4)
+    const auto valid_pitch = [minimum](std::uint32_t value) -> std::uint32_t
     {
-        const std::size_t at = position - delta;
+        const std::uint32_t pitch = value & 0xfffffu;
+        return pitch && pitch <= 0x100000u && (!minimum || pitch >= minimum) ? pitch : 0u;
+    };
+
+    // SOCOM 4 writes OFFSET..IMAGE_RECT first, then writes CONTROL3. The
+    // following CONTROL3 belongs to the texture being bound, so prefer it over
+    // older register state. Walk only real packet boundaries, and stop if the
+    // same texture unit is rebound before CONTROL3 appears.
+    const std::uint32_t texture_cmd = read_be32(data + position);
+    const std::uint32_t texture_count = (texture_cmd >> 18) & 0x7ffu;
+    const std::uint64_t texture_step64 = 4ull * (static_cast<std::uint64_t>(texture_count) + 1ull);
+    if (texture_count && texture_step64 <= data_size - position)
+    {
+        std::size_t at = position + static_cast<std::size_t>(texture_step64);
+        while (at + 4 <= data_size)
+        {
+            const std::uint32_t cmd = read_be32(data + at);
+            if (cmd == 0x00020000u) break;
+            if ((cmd & 0xE0000003u) == 0x20000000u || (cmd & 3u) != 0)
+            {
+                at += 4;
+                continue;
+            }
+
+            const std::uint32_t method = cmd & 0xfffcu;
+            const std::uint32_t count = (cmd >> 18) & 0x7ffu;
+            if (!count)
+            {
+                at += 4;
+                continue;
+            }
+            const std::uint64_t step64 = 4ull * (static_cast<std::uint64_t>(count) + 1ull);
+            if (step64 > data_size - at) break;
+            const bool is_non_increment = (cmd & non_increment) != 0;
+
+            for (std::uint32_t arg = 0; arg < count; ++arg)
+            {
+                const std::uint64_t effective_method = is_non_increment
+                    ? method
+                    : static_cast<std::uint64_t>(method) + static_cast<std::uint64_t>(arg) * 4ull;
+
+                if (effective_method == target)
+                    return valid_pitch(read_be32(data + at + static_cast<std::size_t>(arg + 1u) * 4u));
+                if (effective_method == texture_offset)
+                    return 0; // A new binding superseded this one before we saw its CONTROL3.
+            }
+
+            at += static_cast<std::size_t>(step64);
+        }
+    }
+
+    // Fallback for streams that establish CONTROL3 before the texture block.
+    // Unlike the old word-at-a-time search, this forward walk can only consume
+    // values that are arguments of genuine FIFO method packets.
+    std::uint32_t last_pitch = 0;
+
+    for (std::size_t at = 0; at + 4 <= position;)
+    {
         const std::uint32_t cmd = read_be32(data + at);
-        if (cmd & non_increment) continue;
+
+        // RETURN, JUMP and CALL are single control-flow words, not method
+        // packets. Keep walking the captured linear buffer; the caller already
+        // bounds live secondary buffers at their first packet-boundary RETURN.
+        if (cmd == 0x00020000u ||
+            (cmd & 0xE0000003u) == 0x20000000u ||
+            (cmd & 3u) != 0)
+        {
+            at += 4;
+            continue;
+        }
+
         const std::uint32_t method = cmd & 0xfffcu;
         const std::uint32_t count = (cmd >> 18) & 0x7ffu;
-        if (!count || count > 64 || method > target) continue;
-        const std::uint32_t slot = (target - method) / 4u;
-        if (method + slot * 4u != target || slot >= count) continue;
-        const std::size_t value_at = at + static_cast<std::size_t>(slot + 1) * 4;
-        if (value_at + 4 > position) continue;
-        const std::uint32_t pitch = read_be32(data + value_at) & 0xfffffu;
-        if (pitch && pitch <= 0x100000u && (!minimum || pitch >= minimum)) return pitch;
+        if (!count)
+        {
+            at += 4;
+            continue;
+        }
+
+        const std::uint64_t step64 = 4ull * (static_cast<std::uint64_t>(count) + 1ull);
+        if (step64 > position - at) break; // Texture packet begins before this packet could end.
+        const std::size_t step = static_cast<std::size_t>(step64);
+        const bool is_non_increment = (cmd & non_increment) != 0;
+
+        for (std::uint32_t arg = 0; arg < count; ++arg)
+        {
+            const std::uint64_t effective_method = is_non_increment
+                ? method
+                : static_cast<std::uint64_t>(method) + static_cast<std::uint64_t>(arg) * 4ull;
+            if (effective_method != target) continue;
+
+            const std::size_t value_at = at + static_cast<std::size_t>(arg + 1u) * 4u;
+            last_pitch = valid_pitch(read_be32(data + value_at));
+        }
+
+        at += step;
     }
-    return 0;
+
+    return last_pitch;
 }
 
 static std::string hex8(std::uint32_t v);
@@ -971,7 +1056,7 @@ static bool dump_payload(HANDLE process, std::uintptr_t vm_base, const TextureDe
     out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     if (!out) return false;
 
-    preview::write_bc_previews(data, t.format, t.width, t.height, raw_path, preview_variants);
+    preview::write_bc_previews(data, t.format, t.width, t.height, t.pitch, raw_path, preview_variants);
     return true;
 }
 
@@ -1394,7 +1479,8 @@ static int capture_active_fifo(HANDLE process, std::uintptr_t vm_base, const Opt
                                                  target_io + static_cast<std::uint32_t>(pos), maps);
                 if (!r) continue;
 
-                r->pitch = find_control3_pitch_before(secondary.data(), pos, r->unit, r->format, r->width);
+                r->pitch = find_control3_pitch_for_texture(secondary.data(), used_size, pos,
+                                                           r->unit, r->format, r->width);
                 if (r->pitch)
                 {
                     TextureDesc sized{};
@@ -1503,7 +1589,8 @@ static int capture_active_fifo(HANDLE process, std::uintptr_t vm_base, const Opt
                                          get + static_cast<std::uint32_t>(i), maps);
         if (!r) continue;
 
-        r->pitch = find_control3_pitch_before(fifo.data(), i, r->unit, r->format, r->width);
+        r->pitch = find_control3_pitch_for_texture(fifo.data(), fifo.size(), i,
+                                                   r->unit, r->format, r->width);
         if (r->pitch)
         {
             TextureDesc sized{};
@@ -1601,7 +1688,8 @@ static int scan_rsx_texture_commands(HANDLE process, std::uintptr_t vm_base, con
                     auto r = parse_rsx_texture_block(data.data() + i, got - i, command_ea, io, maps);
                     if (!r) continue;
 
-                    r->pitch = find_control3_pitch_before(data.data(), i, r->unit, r->format, r->width);
+                    r->pitch = find_control3_pitch_for_texture(data.data(), got, i,
+                                                               r->unit, r->format, r->width);
                     if (r->pitch)
                     {
                         TextureDesc sized{};

@@ -12,6 +12,7 @@ bool write_bc_previews(const std::vector<std::uint8_t>& data,
                        std::uint8_t format,
                        std::uint16_t width,
                        std::uint16_t height,
+                       std::uint32_t pitch,
                        const std::filesystem::path& raw_path,
                        bool variants);
 }

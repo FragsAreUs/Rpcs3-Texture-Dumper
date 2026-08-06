@@ -16,7 +16,7 @@ The first target is SOCOM 4 (`BCUS98135`), but the scanner is not tied to that t
 - Can scan for `CellGcmControl` (`PUT/GET/REF`) and `CellGcmContextData` (`begin/end/current/callback`) state with `--fifo-scan`, sample it repeatedly, and rank moving candidates first. Control candidates are restricted to high guest mappings so ordinary ELF pointers cannot exhaust the candidate list before RPCS3's `0x50100000` RSX control mapping is reached.
 - Can snapshot SOCOM 4's confirmed live primary FIFO with `--fifo-capture`. The corrected live scan identified `CellGcmControl` at guest EA `0x50100040`; this mode reads that control, resolves its current GET/PUT through the confirmed IO map, writes only that bounded primary FIFO window, and scans the snapshot for inline texture packets.
 - Can follow the six SOCOM 4 secondary command-buffer CALL targets confirmed by the live FIFO/context correlation with `--fifo-follow-calls`. The observed frame cycle is `0x421E4700+0x4216C580`, `0x421EC780+0x42194600`, `0x421F4800+0x421BC680`, then back to the first pair.
-- For linear fragment textures, the RSX scan now searches backward for the matching `NV4097_SET_TEXTURE_CONTROL3` state and records its low-20-bit row pitch. This matches RPCS3's current fragment-texture decoder and prevents non-power-of-two DXT textures from being sized as tightly packed when the game supplied a padded pitch.
+- For linear fragment textures, the RSX scan walks real FIFO packet boundaries to recover `NV4097_SET_TEXTURE_CONTROL3`. SOCOM 4's captured secondary streams write CONTROL3 immediately **after** the texture register block, so that following write is preferred; a prior packet-aware state value is only a fallback for other stream layouts. This also handles CONTROL3 embedded in incrementing multi-method packets while refusing to reinterpret arbitrary argument words as packet headers. The low 20 bits are recorded as row pitch, matching RPCS3's fragment-texture state and preventing non-power-of-two DXT textures from being sized as tightly packed when the game supplied a padded pitch.
 - Can scan guest state for packed `CellGcmTileInfo` entries with `--tile-scan`. `--tile-offset` highlights tile regions that cover a specific LOCAL/MAIN RSX offset; this is the diagnostic needed before detiling raw LOCAL-memory captures.
 - Resolves both `CELL_GCM_LOCATION_LOCAL` and mapped `CELL_GCM_LOCATION_MAIN` texture sources.
 - Deduplicates matching descriptors.
@@ -31,6 +31,13 @@ It does **not** write to RPCS3 or game memory.
 ## Raw + verified previews
 
 RSX textures are not all stored as ordinary linear RGBA pixels. RPCS3 itself has format-specific upload/deswizzle handling, so the CLI diagnostic path preserves the original bytes and metadata. BC1/BC2/BC3 additionally get verified BMP color previews; the GUI publishes those verified previews only. Other formats remain available as raw CLI diagnostics until their SOCOM 4 layout is proven from live captures.
+
+Linear BC previews are pitch-aware. When the texture format carries
+`CELL_GCM_TEXTURE_LN` (`0x20`) and CONTROL3 supplied a valid pitch, the decoder
+steps between compressed block rows using that RSX pitch instead of assuming a
+tightly packed BC surface. This matters for SOCOM 4 `A6/A7/A8` textures: a
+confirmed 300x500 `A8` sample uses a 1680-byte row pitch even though its packed
+BC3 row width is only 1200 bytes.
 
 RPCS3's current renderer represents decoded fragment/vertex texture state and performs format/layout work in its RSX texture code:
 
@@ -246,7 +253,7 @@ For SOCOM 4, the built-in profile contains the mappings confirmed across the sup
 - `--fifo-capture` snapshots the primary FIFO only from a safe linear sample where GET and PUT resolve through the same known IO map and GET is not numerically beyond PUT. Wrapped samples are retried automatically rather than reconstructed as a guessed ring span. With `--fifo-follow-calls`, the six confirmed SOCOM 4 secondary `0x421xxxxx` command contexts are followed; arbitrary CALL/JUMP graphs for other games are not reconstructed yet.
 - RSX MAIN mappings must either come from a built-in profile or appear in the supplied log. A texture whose mapping is absent cannot be resolved automatically.
 - LOCAL texture addressing uses RPCS3's normal `0xC0000000 + offset` guest mapping convention.
-- v0.1 still estimates payload size, but the RSX route now recovers nearby `SET_TEXTURE_CONTROL3` pitch state for linear textures when available. `--tile-scan` can recover packed tile-region metadata, but raw texture payloads are not automatically detiled yet. Mip chains, cubemaps, unusual formats and command streams that set pitch state far from the texture packet will need more state reconstruction in later versions.
+- v0.1 still estimates payload size, but the RSX route now recovers packet-associated `SET_TEXTURE_CONTROL3` pitch state for linear textures when available. `--tile-scan` can recover packed tile-region metadata, but raw texture payloads are not automatically detiled yet. Mip chains, cubemaps, unusual formats and command streams that set pitch state outside the captured packet window will need more state reconstruction in later versions.
 - Automatic previews currently cover the BC/DXT color data only. Alpha is intentionally omitted from the 24-bit BMP preview. Direct CLI dumps preserve the original compressed `.bin` unchanged; GUI worker raws are temporary and are removed after BMP publication.
 
 For the next iteration, keep `textures.csv` and a few `.bin` files corresponding to obvious large textures; those will tell us exactly which SOCOM formats/deswizzle paths to implement first.

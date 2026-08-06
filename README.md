@@ -13,6 +13,7 @@ The current version is built and tested around **SOCOM 4: U.S. Navy SEALs — BC
 - Automatic capture tuning in the GUI; no budget/history/sample/delay/max values to guess.
 - Deep texture capture follows the game's confirmed secondary RSX command buffers.
 - Dumps BC1/DXT1, BC2/DXT23 and BC3/DXT45 textures to viewable `.bmp` files.
+- Respects RSX row pitch for linear BC textures such as `A6/A7/A8`, using packet-aware `CONTROL3` state tracking to avoid padded-row preview corruption.
 - SOCOM 4 textures are automatically Flip-Y corrected for normal viewing.
 - GUI output contains **BMP files only**.
 - Textures are saved directly to the selected game/profile folder with no per-capture subfolders.

@@ -56,7 +56,8 @@ void decode_bc_color(const std::uint8_t* p, bool bc1, Rgb out[16])
 }
 
 bool write_bmp(const std::vector<std::uint8_t>& data, std::uint8_t format,
-               std::uint16_t width, std::uint16_t height, const fs::path& path,
+               std::uint16_t width, std::uint16_t height, std::uint32_t pitch,
+               const fs::path& path,
                bool flip_x, bool flip_y)
 {
     const std::uint8_t base = static_cast<std::uint8_t>(format & ~0x60u);
@@ -66,7 +67,17 @@ bool write_bmp(const std::vector<std::uint8_t>& data, std::uint8_t format,
     const unsigned block_bytes = bc1 ? 8u : 16u;
     const unsigned bw = (width + 3u) / 4u;
     const unsigned bh = (height + 3u) / 4u;
-    const std::size_t needed = static_cast<std::size_t>(bw) * bh * block_bytes;
+    const std::size_t packed_row_bytes = static_cast<std::size_t>(bw) * block_bytes;
+
+    // CELL_GCM_TEXTURE_LN (0x20) means compressed block rows use CONTROL3
+    // pitch. SOCOM 4 can align this above the tightly packed BC row width.
+    // Ignoring that padding makes every following row start at the wrong block.
+    std::size_t source_row_bytes = packed_row_bytes;
+    if ((format & 0x20u) && pitch >= packed_row_bytes)
+        source_row_bytes = pitch;
+
+    const std::size_t needed = bh == 0 ? 0 :
+        (static_cast<std::size_t>(bh - 1u) * source_row_bytes + packed_row_bytes);
     if (width == 0 || height == 0 || data.size() < needed) return false;
 
     std::vector<Rgb> image(static_cast<std::size_t>(width) * height);
@@ -74,7 +85,8 @@ bool write_bmp(const std::vector<std::uint8_t>& data, std::uint8_t format,
     {
         for (unsigned bx = 0; bx < bw; ++bx)
         {
-            const auto* block = data.data() + (static_cast<std::size_t>(by) * bw + bx) * block_bytes;
+            const auto* block = data.data() + static_cast<std::size_t>(by) * source_row_bytes +
+                                static_cast<std::size_t>(bx) * block_bytes;
             Rgb colors[16]{};
             decode_bc_color(block + (bc1 ? 0u : 8u), bc1, colors);
             for (unsigned py = 0; py < 4; ++py)
@@ -133,21 +145,22 @@ bool write_bc_previews(const std::vector<std::uint8_t>& data,
                        std::uint8_t format,
                        std::uint16_t width,
                        std::uint16_t height,
+                       std::uint32_t pitch,
                        const fs::path& raw_path,
                        bool variants)
 {
     // User-validated SOCOM 4 default: logical Y flip.
     fs::path normal = raw_path;
     normal.replace_extension(L".bmp");
-    const bool wrote = write_bmp(data, format, width, height, normal, false, true);
+    const bool wrote = write_bmp(data, format, width, height, pitch, normal, false, true);
     if (!wrote) return false;
     if (!variants) return true;
 
     const auto stem = raw_path.stem().wstring();
     const auto parent = raw_path.parent_path();
-    write_bmp(data, format, width, height, parent / (stem + L"_neutral.bmp"), false, false);
-    write_bmp(data, format, width, height, parent / (stem + L"_flipx.bmp"), true, false);
-    write_bmp(data, format, width, height, parent / (stem + L"_flipxy.bmp"), true, true);
+    write_bmp(data, format, width, height, pitch, parent / (stem + L"_neutral.bmp"), false, false);
+    write_bmp(data, format, width, height, pitch, parent / (stem + L"_flipx.bmp"), true, false);
+    write_bmp(data, format, width, height, pitch, parent / (stem + L"_flipxy.bmp"), true, true);
     return true;
 }
 }

@@ -17,8 +17,9 @@ working RSX capture code in `main.cpp`.
   engine. The GUI invokes that same engine with `CREATE_NO_WINDOW`, so there is
   no separate CLI executable or CMD dependency.
 - `preview.*` - verified BC1/BC2/BC3 color-preview decoder and BMP writer.
-  Flip-Y is the normal SOCOM 4 preview orientation. Optional orientation
-  variants are diagnostic output only.
+  Flip-Y is the normal SOCOM 4 preview orientation. Linear BC formats use the
+  captured RSX CONTROL3 pitch so padded block rows decode correctly. Optional
+  orientation variants are diagnostic output only.
 
 As the broader RPCS3 reverse-engineering project grows, unrelated features such
 as shadow controls, MLAA experiments, patch management, or memory tools should
