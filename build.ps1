@@ -39,24 +39,63 @@ New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
 
 Write-Host "[*] Compiler: $compiler"
 Write-Host "[*] Building RPCS3TextureDumper..."
+Write-Host ""
 
-$compilerArgs = @(
+$commonCompileArgs = @(
     "-std=c++20"
     "-O2"
     "-Wall"
     "-Wextra"
-    "-mwindows"
-    "-municode"
-    "-static"
-    "-static-libgcc"
-    "-static-libstdc++"
     "-DUNICODE"
     "-D_UNICODE"
     "-DNOMINMAX"
     "-DWIN32_LEAN_AND_MEAN"
 )
-$compilerArgs += $sources
-$compilerArgs += @(
+
+$objects = @()
+$totalSteps = $sources.Count + 1
+$step = 0
+$buildTimer = [System.Diagnostics.Stopwatch]::StartNew()
+
+foreach ($source in $sources) {
+    $step++
+    $sourceName = Split-Path -Leaf $source
+    $objectName = [System.IO.Path]::GetFileNameWithoutExtension($sourceName) + ".o"
+    $object = Join-Path $buildDir $objectName
+    $objects += $object
+
+    Write-Host ("[{0}/{1}] Compiling {2}..." -f $step, $totalSteps, $sourceName) -ForegroundColor Cyan
+    $compileArgs = @()
+    $compileArgs += $commonCompileArgs
+    $compileArgs += @(
+        "-c"
+        $source
+        "-o"
+        $object
+    )
+
+    # Invoke GCC directly so warnings/errors are streamed to this PowerShell
+    # window as GCC produces them instead of being captured and printed later.
+    & $compiler @compileArgs
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        Write-Host ""
+        Write-Host "[!] Compilation failed in $sourceName with exit code $exitCode." -ForegroundColor Red
+        exit $exitCode
+    }
+}
+
+$step++
+Write-Host ("[{0}/{1}] Linking RPCS3TextureDumper.exe..." -f $step, $totalSteps) -ForegroundColor Cyan
+$linkArgs = @(
+    "-mwindows"
+    "-municode"
+    "-static"
+    "-static-libgcc"
+    "-static-libstdc++"
+)
+$linkArgs += $objects
+$linkArgs += @(
     "-luser32"
     "-lgdi32"
     "-lshell32"
@@ -65,11 +104,23 @@ $compilerArgs += @(
     $output
 )
 
-& $compiler @compilerArgs
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[!] Build failed with exit code $LASTEXITCODE." -ForegroundColor Red
-    exit $LASTEXITCODE
+& $compiler @linkArgs
+$exitCode = $LASTEXITCODE
+if ($exitCode -ne 0) {
+    Write-Host ""
+    Write-Host "[!] Link failed with exit code $exitCode." -ForegroundColor Red
+    exit $exitCode
 }
 
+# Object files are only needed by the linker. Keep them when a build fails so
+# they remain available for diagnostics, but remove them after a successful
+# link so compiler intermediates do not clutter the build folder.
+Write-Host "[+] Cleaning intermediate object files..."
+foreach ($object in $objects) {
+    Remove-Item -LiteralPath $object -Force -ErrorAction SilentlyContinue
+}
+
+$buildTimer.Stop()
 Write-Host ""
 Write-Host "[+] Built: $output" -ForegroundColor Green
+Write-Host ("[+] Build completed in {0:N1} seconds." -f $buildTimer.Elapsed.TotalSeconds) -ForegroundColor Green
