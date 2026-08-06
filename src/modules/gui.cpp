@@ -75,7 +75,8 @@ std::wstring exe_path()
 
 std::wstring default_output_path()
 {
-    return (fs::path(exe_path()).parent_path() / L"dumps" / profiles::default_profile().id).wstring();
+    const auto& profile = profiles::default_profile();
+    return (fs::path(exe_path()).parent_path() / L"dumps" / profiles::dump_folder_name(profile)).wstring();
 }
 
 const profiles::GameProfile& selected_profile()
@@ -88,11 +89,6 @@ const profiles::GameProfile& selected_profile()
     return available[static_cast<std::size_t>(selected)];
 }
 
-std::wstring selected_profile_id()
-{
-    return std::wstring(selected_profile().id);
-}
-
 std::wstring selected_profile_name()
 {
     return std::wstring(selected_profile().game_name);
@@ -100,7 +96,8 @@ std::wstring selected_profile_name()
 
 std::wstring default_output_path_for_selected_profile()
 {
-    return (fs::path(exe_path()).parent_path() / L"dumps" / selected_profile_id()).wstring();
+    const auto& profile = selected_profile();
+    return (fs::path(exe_path()).parent_path() / L"dumps" / profiles::dump_folder_name(profile)).wstring();
 }
 
 void refresh_profile_ui()
@@ -366,7 +363,7 @@ bool launch_dump()
     std::error_code ec;
     const std::wstring run_name = worker_run_name();
     // The selected output is already the active profile folder
-    // (for example dumps\BCUS98135). Publish BMPs directly into it.
+    // (for example dumps\SOCOM 4 - BCUS98135). Publish BMPs directly into it.
     g.profile_output = fs::path(output_root);
     g.worker_output = fs::temp_directory_path(ec) / L"RPCS3TextureDumper_work" /
                       (run_name + L"_" + std::to_wstring(GetCurrentProcessId()));

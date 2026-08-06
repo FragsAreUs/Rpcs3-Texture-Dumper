@@ -23,7 +23,7 @@ The first target is SOCOM 4 (`BCUS98135`), but the scanner is not tied to that t
 - Dumps the raw texture payload and a CSV manifest containing the descriptor address, resolved guest address, format, dimensions, pitch, remap, mip count and estimated byte size.
 - Emits viewable 24-bit `.bmp` previews beside dumped BC1/DXT1 (`0x86`) and BC2/BC3/DXT23/45 (`0x87`/`0x88`) payloads. Live SOCOM 4 testing established Flip-Y as the useful normal viewing orientation, so that is now the default `.bmp`. Optional orientation diagnostics can also emit neutral, Flip-X and Flip-XY copies. Direct CLI dumps keep the original `.bin` untouched; the GUI uses raw files only as temporary decoding input and removes them after publishing BMPs.
 - Double-clicking `RPCS3TextureDumper.exe` opens a native texture-dumping GUI with no console/CMD window. The executable is linked as a Windows GUI application; command-line arguments still enter the existing CLI engine, which the GUI uses as its invisible worker.
-- The GUI defaults directly to the active profile folder, `dumps\BCUS98135` beside the EXE. BMPs accumulate in that profile folder instead of creating a separate timestamped folder for every capture, making the final static EXE safe to move into its own standalone folder.
+- The GUI defaults directly to the active profile folder, `dumps\SOCOM 4 - BCUS98135` beside the EXE. BMPs accumulate in that profile folder instead of creating a separate timestamped folder for every capture, making the final static EXE safe to move into its own standalone folder.
 - GUI profile folders contain **BMP files only**. FIFO captures, CSV manifests and raw `.bin` payloads are kept in a private temporary worker directory while decoding and are removed after the BMPs are published. The advanced CLI still retains those diagnostic files when invoked directly.
 
 It does **not** write to RPCS3 or game memory.
@@ -139,7 +139,7 @@ GUI captures publish directly into the selected profile folder, for example:
 ```text
 RPCS3TextureDumper.exe
 dumps\
-  BCUS98135\
+  SOCOM 4 - BCUS98135\
     tex_0000_....bmp
     tex_0001_....bmp
 ```

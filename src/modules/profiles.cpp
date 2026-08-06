@@ -82,4 +82,19 @@ const GameProfile* find(std::wstring_view name)
     }
     return nullptr;
 }
+
+std::wstring dump_folder_name(const GameProfile& profile)
+{
+    std::wstring name = std::wstring(profile.game_name) + L" - " + std::wstring(profile.id);
+    for (auto& character : name)
+    {
+        const bool invalid = character < 32 || character == L'<' || character == L'>' ||
+                             character == L':' || character == L'"' || character == L'/' ||
+                             character == L'\\' || character == L'|' || character == L'?' ||
+                             character == L'*';
+        if (invalid) character = L'_';
+    }
+    while (!name.empty() && (name.back() == L' ' || name.back() == L'.')) name.pop_back();
+    return name.empty() ? std::wstring(profile.id) : name;
+}
 }

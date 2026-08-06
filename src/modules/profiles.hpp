@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace profiles
@@ -46,4 +47,5 @@ struct GameProfile
 std::span<const GameProfile> all();
 const GameProfile& default_profile();
 const GameProfile* find(std::wstring_view name);
+std::wstring dump_folder_name(const GameProfile& profile);
 }

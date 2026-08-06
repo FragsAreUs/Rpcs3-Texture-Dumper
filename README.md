@@ -105,8 +105,8 @@ profile. Normal GUI use does not require entering numeric tuning values.
 Choose the matching game profile in the GUI. By default, textures are placed in that profile's folder, for example:
 
 ```text
-dumps\BCUS98135\
-dumps\BCUS98110\
+dumps\SOCOM 4 - BCUS98135\
+dumps\MAG - BCUS98110\
 ```
 
 The GUI publishes only `.bmp` files there. Internal FIFO captures, manifests and raw payloads are temporary and are removed automatically after the previews are produced.
