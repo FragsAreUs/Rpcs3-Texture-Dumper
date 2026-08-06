@@ -6,6 +6,8 @@ working RSX capture code in `main.cpp`.
 
 - `gui.*` - native Win32 texture-dumping front end. It launches the same EXE in
   invisible CLI worker mode, captures output, and owns folder/workflow UI only.
+  Numeric capture tuning is intentionally automatic in the GUI; manual budget,
+  FIFO-history, retry and candidate limits stay in the hidden diagnostic CLI.
   The worker uses a per-run temporary directory; the GUI publishes only `.bmp`
   files directly into the user-selected profile folder and then removes its temporary
   raw/FIFO/CSV diagnostics. Publication also rejects byte-for-byte duplicate BMPs

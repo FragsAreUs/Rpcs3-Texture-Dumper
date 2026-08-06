@@ -41,11 +41,6 @@ enum ControlId
     ID_OPEN,
     ID_DEEP,
     ID_VARIANTS,
-    ID_BUDGET,
-    ID_HISTORY,
-    ID_SAMPLES,
-    ID_DELAY,
-    ID_MAX_TEXTURES,
     ID_LOG,
     ID_STATUS
 };
@@ -374,13 +369,8 @@ bool launch_dump()
     const std::wstring exe = exe_path();
     std::wostringstream cmd;
     cmd << quote(exe)
-        << L" --profile BCUS98135 --fifo-capture --dump"
-        << L" --out " << quote(g.worker_output.wstring())
-        << L" --budget-mb " << control_text(ID_BUDGET)
-        << L" --fifo-history-mb " << control_text(ID_HISTORY)
-        << L" --fifo-samples " << control_text(ID_SAMPLES)
-        << L" --fifo-sample-ms " << control_text(ID_DELAY)
-        << L" --max " << control_text(ID_MAX_TEXTURES);
+        << L" --profile BCUS98135 --fifo-capture --dump --auto-tune"
+        << L" --out " << quote(g.worker_output.wstring());
     if (SendMessageW(GetDlgItem(g.window, ID_DEEP), BM_GETCHECK, 0, 0) == BST_CHECKED)
         cmd << L" --fifo-follow-calls";
     if (SendMessageW(GetDlgItem(g.window, ID_VARIANTS), BM_GETCHECK, 0, 0) == BST_CHECKED)
@@ -467,32 +457,23 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
         SendMessageW(deep, BM_SETCHECK, BST_CHECKED, 0);
         add(L"BUTTON", L"Write orientation diagnostics", BS_AUTOCHECKBOX, 295, 143, 225, 22, ID_VARIANTS);
 
-        add(L"STATIC", L"Budget MB", SS_LEFT, 18, 181, 75, 20, -1);
-        add(L"EDIT", L"1024", WS_BORDER | ES_NUMBER, 92, 177, 72, 24, ID_BUDGET);
-        add(L"STATIC", L"History MB", SS_LEFT, 181, 181, 78, 20, -1);
-        add(L"EDIT", L"2", WS_BORDER | ES_NUMBER, 258, 177, 55, 24, ID_HISTORY);
-        add(L"STATIC", L"Samples", SS_LEFT, 331, 181, 58, 20, -1);
-        add(L"EDIT", L"40", WS_BORDER | ES_NUMBER, 389, 177, 55, 24, ID_SAMPLES);
-        add(L"STATIC", L"Delay ms", SS_LEFT, 462, 181, 62, 20, -1);
-        add(L"EDIT", L"100", WS_BORDER | ES_NUMBER, 524, 177, 60, 24, ID_DELAY);
-        add(L"STATIC", L"Max", SS_LEFT, 602, 181, 35, 20, -1);
-        add(L"EDIT", L"2000", WS_BORDER | ES_NUMBER, 638, 177, 90, 24, ID_MAX_TEXTURES);
+        add(L"STATIC", L"Capture tuning: Automatic - no manual values required", SS_LEFT, 18, 181, 520, 20, -1);
 
-        g.dump = add(L"BUTTON", L"Dump Textures", BS_DEFPUSHBUTTON, 18, 218, 130, 32, ID_DUMP);
-        g.stop = add(L"BUTTON", L"Stop", BS_PUSHBUTTON, 158, 218, 90, 32, ID_STOP);
+        g.dump = add(L"BUTTON", L"Dump Textures", BS_DEFPUSHBUTTON, 18, 210, 130, 32, ID_DUMP);
+        g.stop = add(L"BUTTON", L"Stop", BS_PUSHBUTTON, 158, 210, 90, 32, ID_STOP);
         EnableWindow(g.stop, FALSE);
-        add(L"BUTTON", L"Open Output Folder", BS_PUSHBUTTON, 258, 218, 150, 32, ID_OPEN);
+        add(L"BUTTON", L"Open Output Folder", BS_PUSHBUTTON, 258, 210, 150, 32, ID_OPEN);
 
-        add(L"STATIC", L"Capture log", SS_LEFT, 18, 266, 100, 20, -1);
+        add(L"STATIC", L"Capture log", SS_LEFT, 18, 258, 100, 20, -1);
         g.log = add(L"EDIT", L"", WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL,
-                    18, 288, 710, 265, ID_LOG);
+                    18, 280, 710, 273, ID_LOG);
         return 0;
     }
     case WM_SIZE:
         if (g.log)
         {
             RECT rc{}; GetClientRect(hwnd, &rc);
-            MoveWindow(g.log, 18, 288, std::max(100L, rc.right - 36), std::max(80L, rc.bottom - 306), TRUE);
+            MoveWindow(g.log, 18, 280, std::max(100L, rc.right - 36), std::max(80L, rc.bottom - 298), TRUE);
         }
         return 0;
     case WM_COMMAND:

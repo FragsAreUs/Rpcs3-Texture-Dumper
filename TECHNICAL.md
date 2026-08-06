@@ -97,7 +97,7 @@ The GUI is intentionally focused on texture dumping only. It exposes:
 - output-root folder picker
 - **Dump Textures**, **Stop**, and **Open Output Folder** buttons
 - deep texture capture, which follows the confirmed secondary command buffers automatically
-- dump budget, recent-history size, capture samples/delay, and maximum-texture controls
+- automatic GUI capture tuning; budget, recent-history size, sample/delay, and maximum-texture controls remain CLI diagnostics
 - optional orientation diagnostic previews; normal BMP output uses the user-confirmed Flip-Y orientation
 - a live capture log
 
@@ -108,6 +108,13 @@ The project deliberately keeps a CLI capture engine inside the same executable. 
 The GUI launches the same EXE with the proven CLI capture arguments using redirected standard output/error and `CREATE_NO_WINDOW`. This keeps the Win32 GUI small while ensuring GUI captures and developer diagnostics share one RSX/FIFO implementation. It also avoids duplicating the most timing-sensitive part of the dumper. Neither the front end nor its worker needs Windows CMD.
 
 The worker process only opens RPCS3 for query/read access. Stopping the capture terminates only that read-only worker, not RPCS3. Developers can still invoke CLI switches explicitly from PowerShell when collecting RSX/FIFO diagnostics.
+
+For the confirmed SOCOM 4 profile, GUI `--auto-tune` currently uses a 1 GiB
+temporary payload budget, an 8 MiB recent-FIFO window, up to 100 samples at
+100 ms intervals, and a 4096-candidate ceiling. The FIFO loop exits as soon as
+it has a useful sample, so the sample count is a retry ceiling rather than a
+fixed delay. CLI diagnostics can omit `--auto-tune` and set these values
+individually when investigating capture behavior.
 
 GUI captures publish directly into the selected profile folder, for example:
 
@@ -210,6 +217,7 @@ no zlib dependency.
 --guest-end HEX           Descriptor scan end EA (default: 0x80000000)
 --vm-base HEX             Override auto-detected host VM base
 --max N                   Maximum unique dumps (default: 2000)
+--auto-tune               Choose safe capture limits/retry timing automatically
 --dump                    Write raw payloads; supported BC formats also get BMP previews
 --preview-variants        Also emit neutral/Flip-X/Flip-XY BMP diagnostics (Flip-Y is default)
 --budget-mb N             Total payload write budget (default: 1024 MB)

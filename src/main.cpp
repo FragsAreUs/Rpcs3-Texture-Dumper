@@ -104,7 +104,34 @@ struct Options
     bool fifo_capture = false;
     bool fifo_follow_calls = false;
     bool preview_variants = false;
+    bool auto_tune = false;
 };
+
+static bool is_socom4_profile(const std::wstring& profile)
+{
+    return _wcsicmp(profile.c_str(), L"BCUS98135") == 0 ||
+           _wcsicmp(profile.c_str(), L"SOCOM4") == 0 ||
+           _wcsicmp(profile.c_str(), L"SOCOM 4") == 0;
+}
+
+static void apply_automatic_capture_tuning(Options& o)
+{
+    if (!o.auto_tune) return;
+
+    // The GUI deliberately exposes no numeric capture knobs. These values are
+    // bounded by the same limits as the diagnostic CLI and favor reliability:
+    // capture exits as soon as it obtains a useful FIFO sample, so 100 samples
+    // is a retry ceiling rather than a mandatory 10-second wait.
+    o.dump_budget_bytes = 1024ull * 1024 * 1024;
+    o.max_textures = 4096;
+    o.fifo_sample_ms = 100;
+    o.fifo_samples = 100;
+
+    // SOCOM 4's primary FIFO calls the confirmed secondary command buffers.
+    // Keeping a wider recent window makes it much less timing-sensitive than
+    // asking the user to guess an exact history size for each scene.
+    o.fifo_history_bytes = (is_socom4_profile(o.profile) ? 8ull : 4ull) * 1024 * 1024;
+}
 
 struct GcmTileCandidate
 {
@@ -1651,6 +1678,7 @@ static void usage()
         L"Usage: RPCS3TextureDumper.exe [options]\n\n"
         L"  --process NAME       Process name (default rpcs3.exe)\n"
         L"  --profile NAME       Built-in RSX mapping profile (BCUS98135/SOCOM4)\n"
+        L"  --auto-tune          Choose safe capture limits/retry timing automatically\n"
         L"  --log PATH           Current uncompressed RPCS3.log\n"
         L"  --out DIR            Output directory\n"
         L"  --guest-start HEX    Descriptor scan start EA\n"
@@ -1691,6 +1719,7 @@ static bool parse_args(int argc, wchar_t** argv, Options& o)
 
         if (a == L"--help" || a == L"-h") { usage(); return false; }
         if (a == L"--dump") { o.list_only = false; continue; }
+        if (a == L"--auto-tune") { o.auto_tune = true; continue; }
         if (a == L"--preview-variants") { o.preview_variants = true; continue; }
         if (a == L"--list-only") { o.list_only = true; continue; }
         if (a == L"--rsx-scan") { o.rsx_scan = true; continue; }
@@ -1775,6 +1804,7 @@ int cli_main(int argc, wchar_t** argv)
 {
     Options opt;
     if (!parse_args(argc, argv, opt)) return argc > 1 ? 1 : 0;
+    apply_automatic_capture_tuning(opt);
     if (opt.guest_start >= opt.guest_end)
     {
         std::wcerr << L"[!] guest-start must be below guest-end.\n";

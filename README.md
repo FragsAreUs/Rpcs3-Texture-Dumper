@@ -10,6 +10,7 @@ The current version is built and tested around **SOCOM 4: U.S. Navy SEALs — BC
 - Automatically finds the running `rpcs3.exe` process.
 - Read-only access to RPCS3/game memory.
 - Built-in SOCOM 4 RSX memory profile.
+- Automatic capture tuning in the GUI; no budget/history/sample/delay/max values to guess.
 - Deep texture capture follows the game's confirmed secondary RSX command buffers.
 - Dumps BC1/DXT1, BC2/DXT23 and BC3/DXT45 textures to viewable `.bmp` files.
 - SOCOM 4 textures are automatically Flip-Y corrected for normal viewing.
@@ -80,6 +81,9 @@ No Windows CMD window, batch build script, or Visual Studio installation is requ
 4. Leave **Deep texture capture** enabled for the best results.
 5. Click **Dump Textures**.
 
+Capture limits and FIFO retry timing are selected automatically for the active
+profile. Normal GUI use does not require entering numeric tuning values.
+
 By default, textures are placed in:
 
 ```text
@@ -95,6 +99,10 @@ The GUI publishes only `.bmp` files there. Internal FIFO captures, manifests and
 The GUI uses that engine as an invisible worker process with `CREATE_NO_WINDOW` and redirects its output back into the GUI capture log. Keeping the capture engine this way lets the GUI reuse the same proven RSX/FIFO code used by our diagnostic commands instead of maintaining a second copy of the capture logic.
 
 Normal texture dumping does not require CMD or direct CLI use. The CLI remains useful for development and reverse-engineering diagnostics and can be invoked from PowerShell when needed.
+
+Manual budget, FIFO-history, sample-count, delay and candidate-limit switches
+remain available only as advanced CLI diagnostics. The GUI uses `--auto-tune`
+so those implementation details do not need to be adjusted by hand.
 
 ## Current Status
 
