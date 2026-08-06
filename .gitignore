@@ -1,0 +1,21 @@
+# Build products
+/build/
+/cmake-build-*/
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/Makefile
+*.exe
+*.o
+*.obj
+*.pdb
+*.zip
+
+# Runtime texture output
+/dumps/
+/rpcs3_texture_dump/
+
+# Local editor/build state
+/.vs/
+/.vscode/
+

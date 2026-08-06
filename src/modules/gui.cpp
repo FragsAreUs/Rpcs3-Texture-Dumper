@@ -1,0 +1,482 @@
+#include "gui.hpp"
+
+#include <windows.h>
+#include <shellapi.h>
+#include <shlobj.h>
+
+#include <algorithm>
+#include <cwchar>
+#include <filesystem>
+#include <sstream>
+#include <string>
+#include <thread>
+
+#ifdef _MSC_VER
+#pragma comment(lib, "user32.lib")
+#pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ole32.lib")
+#endif
+
+namespace fs = std::filesystem;
+
+namespace
+{
+constexpr wchar_t kClassName[] = L"RPCS3TextureDumperWindow";
+constexpr UINT WM_DUMPER_LOG = WM_APP + 1;
+constexpr UINT WM_DUMPER_DONE = WM_APP + 2;
+
+enum ControlId
+{
+    ID_OUTPUT = 100,
+    ID_BROWSE,
+    ID_DUMP,
+    ID_STOP,
+    ID_OPEN,
+    ID_DEEP,
+    ID_VARIANTS,
+    ID_BUDGET,
+    ID_HISTORY,
+    ID_SAMPLES,
+    ID_DELAY,
+    ID_MAX_TEXTURES,
+    ID_LOG,
+    ID_STATUS
+};
+
+struct State
+{
+    HWND window = nullptr;
+    HWND output = nullptr;
+    HWND dump = nullptr;
+    HWND stop = nullptr;
+    HWND log = nullptr;
+    HWND status = nullptr;
+    PROCESS_INFORMATION child{};
+    HANDLE pipe_read = nullptr;
+    fs::path profile_output;
+    fs::path worker_output;
+    bool running = false;
+};
+
+State g;
+
+std::wstring exe_path()
+{
+    std::wstring result(32768, L'\0');
+    const DWORD n = GetModuleFileNameW(nullptr, result.data(), static_cast<DWORD>(result.size()));
+    result.resize(n);
+    return result;
+}
+
+std::wstring default_output_path()
+{
+    return (fs::path(exe_path()).parent_path() / L"dumps" / L"BCUS98135").wstring();
+}
+
+std::wstring worker_run_name()
+{
+    SYSTEMTIME t{};
+    GetLocalTime(&t);
+    wchar_t name[64]{};
+    std::swprintf(name, sizeof(name) / sizeof(name[0]), L"run_%04u%02u%02u_%02u%02u%02u",
+                  t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+    return name;
+}
+
+std::wstring text_of(HWND h)
+{
+    const int n = GetWindowTextLengthW(h);
+    std::wstring s(static_cast<std::size_t>(n) + 1, L'\0');
+    GetWindowTextW(h, s.data(), n + 1);
+    s.resize(n);
+    return s;
+}
+
+std::wstring control_text(int id)
+{
+    return text_of(GetDlgItem(g.window, id));
+}
+
+void append_log(const std::wstring& s)
+{
+    const int len = GetWindowTextLengthW(g.log);
+    SendMessageW(g.log, EM_SETSEL, len, len);
+    SendMessageW(g.log, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(s.c_str()));
+    SendMessageW(g.log, EM_SCROLLCARET, 0, 0);
+}
+
+std::wstring quote(const std::wstring& s)
+{
+    std::wstring out = L"\"";
+    for (wchar_t c : s)
+    {
+        if (c == L'\"') out += L'\\';
+        out += c;
+    }
+    out += L'\"';
+    return out;
+}
+
+std::wstring decode_pipe_text(const char* data, int size)
+{
+    if (size <= 0) return {};
+    int chars = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, data, size, nullptr, 0);
+    UINT cp = CP_UTF8;
+    DWORD flags = MB_ERR_INVALID_CHARS;
+    if (chars <= 0)
+    {
+        cp = CP_ACP;
+        flags = 0;
+        chars = MultiByteToWideChar(cp, flags, data, size, nullptr, 0);
+    }
+    if (chars <= 0) return {};
+    std::wstring out(static_cast<std::size_t>(chars), L'\0');
+    MultiByteToWideChar(cp, flags, data, size, out.data(), chars);
+    return out;
+}
+
+void set_running(bool running)
+{
+    g.running = running;
+    EnableWindow(g.dump, !running);
+    EnableWindow(g.stop, running);
+    SetWindowTextW(g.status, running ? L"Capturing textures from RPCS3..." : L"Ready - start RPCS3 and load SOCOM 4.");
+}
+
+void finish_child()
+{
+    if (g.child.hThread) { CloseHandle(g.child.hThread); g.child.hThread = nullptr; }
+    if (g.child.hProcess) { CloseHandle(g.child.hProcess); g.child.hProcess = nullptr; }
+    if (g.pipe_read) { CloseHandle(g.pipe_read); g.pipe_read = nullptr; }
+    set_running(false);
+}
+
+void cleanup_worker_output()
+{
+    if (g.worker_output.empty()) return;
+    // This is always the exact per-capture directory created by launch_dump()
+    // beneath the system temporary directory.
+    std::error_code ec;
+    fs::remove_all(g.worker_output, ec);
+    g.worker_output.clear();
+}
+
+std::size_t publish_bmp_output()
+{
+    if (g.worker_output.empty() || g.profile_output.empty()) return 0;
+    std::error_code ec;
+    fs::create_directories(g.profile_output, ec);
+    if (ec)
+    {
+        cleanup_worker_output();
+        return 0;
+    }
+
+    std::size_t copied = 0;
+    for (fs::directory_iterator it(g.worker_output, ec), end; !ec && it != end; it.increment(ec))
+    {
+        if (!it->is_regular_file(ec)) continue;
+        const fs::path& src = it->path();
+        if (_wcsicmp(src.extension().c_str(), L".bmp") != 0) continue;
+        fs::copy_file(src, g.profile_output / src.filename(), fs::copy_options::overwrite_existing, ec);
+        if (!ec) ++copied;
+        ec.clear();
+    }
+
+    // The public profile folder receives BMPs only; discard the worker's
+    // manifests, FIFO captures and raw payloads after publishing previews.
+    cleanup_worker_output();
+    return copied;
+}
+
+void reader_thread(HANDLE pipe, HANDLE process, HWND window)
+{
+    char buffer[4096];
+    DWORD got = 0;
+    while (ReadFile(pipe, buffer, sizeof(buffer), &got, nullptr) && got)
+    {
+        auto* message = new std::wstring(decode_pipe_text(buffer, static_cast<int>(got)));
+        PostMessageW(window, WM_DUMPER_LOG, 0, reinterpret_cast<LPARAM>(message));
+    }
+    WaitForSingleObject(process, INFINITE);
+    DWORD exit_code = 0;
+    GetExitCodeProcess(process, &exit_code);
+    PostMessageW(window, WM_DUMPER_DONE, exit_code, 0);
+}
+
+bool launch_dump()
+{
+    if (g.running) return false;
+    const std::wstring output_root = control_text(ID_OUTPUT);
+    if (output_root.empty())
+    {
+        MessageBoxW(g.window, L"Choose an output folder first.", L"RPCS3 Texture Dumper", MB_OK | MB_ICONWARNING);
+        return false;
+    }
+
+    std::error_code ec;
+    const std::wstring run_name = worker_run_name();
+    // The selected output is already the active profile folder
+    // (for example dumps\BCUS98135). Publish BMPs directly into it.
+    g.profile_output = fs::path(output_root);
+    g.worker_output = fs::temp_directory_path(ec) / L"RPCS3TextureDumper_work" /
+                      (run_name + L"_" + std::to_wstring(GetCurrentProcessId()));
+    if (ec)
+    {
+        MessageBoxW(g.window, L"The temporary working folder could not be resolved.", L"RPCS3 Texture Dumper", MB_OK | MB_ICONERROR);
+        return false;
+    }
+    fs::create_directories(g.profile_output, ec);
+    if (ec)
+    {
+        MessageBoxW(g.window, L"The output folder could not be created.", L"RPCS3 Texture Dumper", MB_OK | MB_ICONERROR);
+        return false;
+    }
+    fs::create_directories(g.worker_output, ec);
+    if (ec)
+    {
+        MessageBoxW(g.window, L"The temporary working folder could not be created.", L"RPCS3 Texture Dumper", MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+    HANDLE pipe_write = nullptr;
+    if (!CreatePipe(&g.pipe_read, &pipe_write, &sa, 0))
+    {
+        cleanup_worker_output();
+        return false;
+    }
+    SetHandleInformation(g.pipe_read, HANDLE_FLAG_INHERIT, 0);
+    HANDLE null_input = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                    &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (null_input == INVALID_HANDLE_VALUE)
+    {
+        CloseHandle(pipe_write);
+        CloseHandle(g.pipe_read); g.pipe_read = nullptr;
+        cleanup_worker_output();
+        return false;
+    }
+
+    const std::wstring exe = exe_path();
+    std::wostringstream cmd;
+    cmd << quote(exe)
+        << L" --profile BCUS98135 --fifo-capture --dump"
+        << L" --out " << quote(g.worker_output.wstring())
+        << L" --budget-mb " << control_text(ID_BUDGET)
+        << L" --fifo-history-mb " << control_text(ID_HISTORY)
+        << L" --fifo-samples " << control_text(ID_SAMPLES)
+        << L" --fifo-sample-ms " << control_text(ID_DELAY)
+        << L" --max " << control_text(ID_MAX_TEXTURES);
+    if (SendMessageW(GetDlgItem(g.window, ID_DEEP), BM_GETCHECK, 0, 0) == BST_CHECKED)
+        cmd << L" --fifo-follow-calls";
+    if (SendMessageW(GetDlgItem(g.window, ID_VARIANTS), BM_GETCHECK, 0, 0) == BST_CHECKED)
+        cmd << L" --preview-variants";
+
+    std::wstring command = cmd.str();
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = pipe_write;
+    si.hStdError = pipe_write;
+    si.hStdInput = null_input;
+
+    ZeroMemory(&g.child, sizeof(g.child));
+    const BOOL ok = CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, TRUE,
+                                   CREATE_NO_WINDOW, nullptr, fs::path(exe).parent_path().c_str(), &si, &g.child);
+    CloseHandle(pipe_write);
+    CloseHandle(null_input);
+    if (!ok)
+    {
+        CloseHandle(g.pipe_read); g.pipe_read = nullptr;
+        cleanup_worker_output();
+        MessageBoxW(g.window, L"Could not start the texture capture engine.", L"RPCS3 Texture Dumper", MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    SetWindowTextW(g.log, L"");
+    append_log(L"RPCS3 Texture Dumper - SOCOM 4\r\nOutput: " + g.profile_output.wstring() + L"\r\nStarting capture...\r\n\r\n");
+    set_running(true);
+    std::thread(reader_thread, g.pipe_read, g.child.hProcess, g.window).detach();
+    return true;
+}
+
+void choose_folder()
+{
+    BROWSEINFOW bi{};
+    bi.hwndOwner = g.window;
+    bi.lpszTitle = L"Choose where dumped textures will be saved";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&bi);
+    if (!pidl) return;
+    wchar_t path[MAX_PATH]{};
+    if (SHGetPathFromIDListW(pidl, path)) SetWindowTextW(g.output, path);
+    CoTaskMemFree(pidl);
+}
+
+HWND add_control(const wchar_t* cls, const wchar_t* text, DWORD style,
+                 int x, int y, int w, int h, int id)
+{
+    return CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style,
+                           x, y, w, h, g.window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
+                           GetModuleHandleW(nullptr), nullptr);
+}
+
+LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    switch (msg)
+    {
+    case WM_CREATE:
+    {
+        g.window = hwnd;
+        HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        auto add = [&](const wchar_t* cls, const wchar_t* text, DWORD style, int x, int y, int w, int h, int id)
+        {
+            HWND c = add_control(cls, text, style, x, y, w, h, id);
+            SendMessageW(c, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            return c;
+        };
+
+        add(L"STATIC", L"RPCS3 Texture Dumper", SS_LEFT, 18, 14, 260, 22, -1);
+        g.status = add(L"STATIC", L"Ready - start RPCS3 and load SOCOM 4.", SS_LEFT, 18, 39, 650, 20, ID_STATUS);
+
+        add(L"STATIC", L"Game profile", SS_LEFT, 18, 72, 100, 20, -1);
+        HWND profile = add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL, 122, 68, 250, 200, -1);
+        SendMessageW(profile, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"SOCOM 4 - BCUS98135 v01.00"));
+        SendMessageW(profile, CB_SETCURSEL, 0, 0);
+        EnableWindow(profile, FALSE);
+
+        add(L"STATIC", L"Output folder", SS_LEFT, 18, 106, 100, 20, -1);
+        g.output = add(L"EDIT", default_output_path().c_str(), WS_BORDER | ES_AUTOHSCROLL, 122, 102, 505, 24, ID_OUTPUT);
+        add(L"BUTTON", L"Browse...", BS_PUSHBUTTON, 636, 101, 92, 26, ID_BROWSE);
+
+        HWND deep = add(L"BUTTON", L"Deep texture capture (recommended)", BS_AUTOCHECKBOX, 18, 143, 255, 22, ID_DEEP);
+        SendMessageW(deep, BM_SETCHECK, BST_CHECKED, 0);
+        add(L"BUTTON", L"Write orientation diagnostics", BS_AUTOCHECKBOX, 295, 143, 225, 22, ID_VARIANTS);
+
+        add(L"STATIC", L"Budget MB", SS_LEFT, 18, 181, 75, 20, -1);
+        add(L"EDIT", L"1024", WS_BORDER | ES_NUMBER, 92, 177, 72, 24, ID_BUDGET);
+        add(L"STATIC", L"History MB", SS_LEFT, 181, 181, 78, 20, -1);
+        add(L"EDIT", L"2", WS_BORDER | ES_NUMBER, 258, 177, 55, 24, ID_HISTORY);
+        add(L"STATIC", L"Samples", SS_LEFT, 331, 181, 58, 20, -1);
+        add(L"EDIT", L"40", WS_BORDER | ES_NUMBER, 389, 177, 55, 24, ID_SAMPLES);
+        add(L"STATIC", L"Delay ms", SS_LEFT, 462, 181, 62, 20, -1);
+        add(L"EDIT", L"100", WS_BORDER | ES_NUMBER, 524, 177, 60, 24, ID_DELAY);
+        add(L"STATIC", L"Max", SS_LEFT, 602, 181, 35, 20, -1);
+        add(L"EDIT", L"2000", WS_BORDER | ES_NUMBER, 638, 177, 90, 24, ID_MAX_TEXTURES);
+
+        g.dump = add(L"BUTTON", L"Dump Textures", BS_DEFPUSHBUTTON, 18, 218, 130, 32, ID_DUMP);
+        g.stop = add(L"BUTTON", L"Stop", BS_PUSHBUTTON, 158, 218, 90, 32, ID_STOP);
+        EnableWindow(g.stop, FALSE);
+        add(L"BUTTON", L"Open Output Folder", BS_PUSHBUTTON, 258, 218, 150, 32, ID_OPEN);
+
+        add(L"STATIC", L"Capture log", SS_LEFT, 18, 266, 100, 20, -1);
+        g.log = add(L"EDIT", L"", WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL,
+                    18, 288, 710, 265, ID_LOG);
+        return 0;
+    }
+    case WM_SIZE:
+        if (g.log)
+        {
+            RECT rc{}; GetClientRect(hwnd, &rc);
+            MoveWindow(g.log, 18, 288, std::max(100L, rc.right - 36), std::max(80L, rc.bottom - 306), TRUE);
+        }
+        return 0;
+    case WM_COMMAND:
+        switch (LOWORD(wparam))
+        {
+        case ID_BROWSE: choose_folder(); return 0;
+        case ID_DUMP: launch_dump(); return 0;
+        case ID_STOP:
+            if (g.running && g.child.hProcess)
+            {
+                append_log(L"\r\n[!] Stopping capture...\r\n");
+                TerminateProcess(g.child.hProcess, 2);
+            }
+            return 0;
+        case ID_OPEN:
+        {
+            fs::path folder = g.profile_output.empty() ? fs::path(control_text(ID_OUTPUT)) : g.profile_output;
+            std::error_code ec; fs::create_directories(folder, ec);
+            ShellExecuteW(hwnd, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            return 0;
+        }
+        }
+        break;
+    case WM_DUMPER_LOG:
+    {
+        auto* s = reinterpret_cast<std::wstring*>(lparam);
+        if (s) { append_log(*s); delete s; }
+        return 0;
+    }
+    case WM_DUMPER_DONE:
+    {
+        const DWORD code = static_cast<DWORD>(wparam);
+        const std::size_t bmp_count = publish_bmp_output();
+        std::wostringstream ss;
+        ss << L"\r\n" << (code == 0 ? L"[+] Texture capture finished successfully.\r\n" : L"[!] Texture capture exited with code ") ;
+        if (code != 0) ss << code << L".\r\n";
+        ss << L"[+] Published " << bmp_count << L" BMP texture(s) to:\r\n    " << g.profile_output.wstring() << L"\r\n";
+        append_log(ss.str());
+        finish_child();
+        return 0;
+    }
+    case WM_CLOSE:
+        if (g.running)
+        {
+            if (MessageBoxW(hwnd, L"A texture capture is still running. Stop it and exit?", L"RPCS3 Texture Dumper",
+                            MB_YESNO | MB_ICONQUESTION) != IDYES) return 0;
+            if (g.child.hProcess)
+            {
+                TerminateProcess(g.child.hProcess, 2);
+                WaitForSingleObject(g.child.hProcess, 5000);
+            }
+            cleanup_worker_output();
+        }
+        DestroyWindow(hwnd);
+        return 0;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wparam, lparam);
+}
+}
+
+namespace gui
+{
+int run()
+{
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    HINSTANCE instance = GetModuleHandleW(nullptr);
+    WNDCLASSEXW wc{};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = window_proc;
+    wc.hInstance = instance;
+    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    wc.lpszClassName = kClassName;
+    RegisterClassExW(&wc);
+
+    HWND hwnd = CreateWindowExW(0, kClassName, L"RPCS3 Texture Dumper - SOCOM 4",
+                                WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 770, 630,
+                                nullptr, nullptr, instance, nullptr);
+    if (!hwnd)
+    {
+        CoUninitialize();
+        return 1;
+    }
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+
+    MSG msg{};
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0)
+    {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+    CoUninitialize();
+    return static_cast<int>(msg.wParam);
+}
+}
