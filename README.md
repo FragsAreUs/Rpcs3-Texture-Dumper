@@ -15,7 +15,7 @@ The current version is built and tested around **SOCOM 4: U.S. Navy SEALs — BC
 - SOCOM 4 textures are automatically Flip-Y corrected for normal viewing.
 - GUI output contains **BMP files only**.
 - Textures are saved directly to the selected game/profile folder with no per-capture subfolders.
-- Contains a hidden CLI capture engine used internally by the GUI and available from PowerShell for advanced RSX/FIFO diagnostics.
+- Advanced CLI modes are still available for RSX/FIFO diagnostics.
 
 ## Building
 
@@ -54,14 +54,6 @@ dumps\BCUS98135\
 ```
 
 The GUI publishes only `.bmp` files there. Internal FIFO captures, manifests and raw payloads are temporary and are removed automatically after the previews are produced.
-
-## Why there is a hidden CLI engine
-
-`RPCS3TextureDumper.exe` is a Windows GUI application and does **not** require a CMD window. When launched normally with no arguments it opens the GUI. When launched with command-line arguments, the same EXE routes those arguments to its internal CLI capture engine.
-
-The GUI uses that engine as an invisible worker process with `CREATE_NO_WINDOW` and redirects its output back into the GUI capture log. Keeping the capture engine this way lets the GUI reuse the same proven RSX/FIFO code used by our diagnostic commands instead of maintaining a second copy of the capture logic.
-
-Normal texture dumping does not require CMD or direct CLI use. The CLI remains useful for development and reverse-engineering diagnostics and can be invoked from PowerShell when needed.
 
 ## Current Status
 
