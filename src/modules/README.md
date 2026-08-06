@@ -12,6 +12,10 @@ working RSX capture code in `main.cpp`.
   files directly into the user-selected profile folder and then removes its temporary
   raw/FIFO/CSV diagnostics. Publication also rejects byte-for-byte duplicate BMPs
   already present in the profile folder or earlier in the same capture.
+- `profiles.*` - the single registry for supported games. A profile owns its
+  title ID/version, GUI label, aliases, CellGcmControl EA, RSX IO maps, Deep
+  Capture type, and known command-buffer ranges. The GUI builds its profile
+  selector from this registry instead of hard-coding SOCOM 4 or MAG.
 - `../entry.cpp` - Windows GUI-subsystem entry point. No console is created when
   the tool is launched normally; arguments are routed to the internal CLI
   engine. The GUI invokes that same engine with `CREATE_NO_WINDOW`, so there is
@@ -25,7 +29,7 @@ As the broader RPCS3 reverse-engineering project grows, unrelated features such
 as shadow controls, MLAA experiments, patch management, or memory tools should
 be separate tools in a future suite rather than added to this GUI.
 
-Good future extraction boundaries inside the texture dumper are `profiles`,
-`capture`, and additional format decoders. Move those only when their interfaces
-are stable; the current live FIFO/CALL capture path is intentionally left in
-`main.cpp` for now because it has been validated against SOCOM 4.
+Good future extraction boundaries inside the texture dumper are `capture` and
+additional format decoders. Profile data has now been separated; the current
+live FIFO/CALL capture path remains in `main.cpp` because it has been validated
+against the supported games.

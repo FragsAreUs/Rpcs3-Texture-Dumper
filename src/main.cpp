@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "cli.hpp"
+#include "modules/profiles.hpp"
 #include "modules/preview.hpp"
 
 namespace fs = std::filesystem;
@@ -55,12 +56,7 @@ struct ModuleInfo
     fs::path path;
 };
 
-struct IoMap
-{
-    std::uint32_t io = 0;
-    std::uint32_t ea = 0;
-    std::uint32_t size = 0;
-};
+using IoMap = profiles::IoMap;
 
 struct TextureDesc
 {
@@ -103,21 +99,21 @@ struct Options
     bool fifo_scan = false;
     bool fifo_capture = false;
     bool fifo_follow_calls = false;
+    bool renderer_ring = false;
     bool preview_variants = false;
     bool auto_tune = false;
 };
 
 static bool is_socom4_profile(const std::wstring& profile)
 {
-    return _wcsicmp(profile.c_str(), L"BCUS98135") == 0 ||
-           _wcsicmp(profile.c_str(), L"SOCOM4") == 0 ||
-           _wcsicmp(profile.c_str(), L"SOCOM 4") == 0;
+    const auto* p = profiles::find(profile);
+    return p && p->deep_capture == profiles::DeepCaptureKind::socom_secondary_calls;
 }
 
-static bool is_mag_profile(const std::wstring& profile)
+static bool is_renderer_ring_profile(const std::wstring& profile)
 {
-    return _wcsicmp(profile.c_str(), L"BCUS98110") == 0 ||
-           _wcsicmp(profile.c_str(), L"MAG") == 0;
+    const auto* p = profiles::find(profile);
+    return p && p->deep_capture == profiles::DeepCaptureKind::renderer_ring;
 }
 
 static void apply_automatic_capture_tuning(Options& o)
@@ -421,27 +417,9 @@ static std::vector<IoMap> parse_io_maps(const fs::path& path)
 
 static std::optional<std::vector<IoMap>> profile_io_maps(const std::wstring& profile)
 {
-    if (_wcsicmp(profile.c_str(), L"BCUS98135") == 0 ||
-        _wcsicmp(profile.c_str(), L"SOCOM4") == 0)
-    {
-        // Confirmed across the supplied SOCOM 4 BCUS98135 RPCS3 logs.
-        return std::vector<IoMap>{
-            {0x00000000u, 0x40000000u, 0x03600000u},
-            {0x03600000u, 0x43600000u, 0x00D00000u},
-            {0x0E000000u, 0x32500000u, 0x00100000u},
-        };
-    }
-    if (is_mag_profile(profile))
-    {
-        // Confirmed from MAG BCUS98110 v02.12 runtime sys_rsx_context_iomap
-        // calls after mage_g.self creates its own RSX context. Do not use the
-        // earlier launcher mappings from the same RPCS3 log.
-        return std::vector<IoMap>{
-            {0x00000000u, 0x50000000u, 0x02300000u},
-            {0x0E000000u, 0x34E00000u, 0x00100000u},
-        };
-    }
-    return std::nullopt;
+    const auto* p = profiles::find(profile);
+    if (!p) return std::nullopt;
+    return std::vector<IoMap>(p->io_maps.begin(), p->io_maps.begin() + p->io_map_count);
 }
 
 static std::optional<std::uint32_t> resolve_texture_ea(std::uint8_t location, std::uint32_t offset, const std::vector<IoMap>& maps)
@@ -1167,6 +1145,137 @@ static bool dump_rsx_payload(HANDLE process, std::uintptr_t vm_base, const RsxTe
     return dump_payload(process, vm_base, t, out_dir, index, preview_variants);
 }
 
+static int capture_renderer_ring(HANDLE process, std::uintptr_t vm_base, const Options& opt,
+                                 const std::vector<IoMap>& maps)
+{
+    const auto* profile = profiles::find(opt.profile);
+    if (!profile || profile->deep_capture != profiles::DeepCaptureKind::renderer_ring)
+    {
+        std::wcerr << L"[!] The selected profile does not define a RendererRing Deep Capture.\n";
+        return 9;
+    }
+    const auto ring = std::span(profile->deep_buffers.data(), profile->deep_buffer_count);
+
+    std::ofstream csv(opt.out_dir / L"renderer_ring_textures.csv");
+    if (!csv)
+    {
+        std::wcerr << L"[!] Could not create renderer_ring_textures.csv.\n";
+        return 16;
+    }
+    csv << "index,buffer,command_ea,io_offset,unit,data_ea,location,offset,format,mipmaps,dimension,cubemap,width,height,pitch,"
+           "header,format_reg,address,control0,control1,filter,image_rect,border_color,estimated_size,dumped\n";
+
+    std::set<std::tuple<std::uint8_t, std::uint32_t, std::uint8_t, std::uint16_t, std::uint16_t>> seen;
+    std::size_t texture_count = 0;
+    std::size_t dumped_count = 0;
+    std::uint64_t dumped_bytes = 0;
+    std::size_t buffers_read = 0;
+
+    std::wcout << L"[+] " << profile->game_name << L" deep capture: scanning all "
+               << ring.size() << L" configured RendererRing command buffers...\n";
+    for (std::size_t buffer_index = 0; buffer_index < ring.size() && texture_count < opt.max_textures; ++buffer_index)
+    {
+        const auto& range = ring[buffer_index];
+        const auto begin_map = io_map_for_offset(range.begin, maps);
+        const auto end_map = io_map_for_offset(range.end - 1u, maps);
+        if (!begin_map || !end_map || *begin_map != *end_map)
+        {
+            std::wcerr << L"[!] " << profile->game_name << L" RendererRing buffer " << buffer_index
+                       << L" does not fit a confirmed RSX IO mapping; skipping it.\n";
+            continue;
+        }
+
+        const auto& map = maps[*begin_map];
+        const std::uint32_t begin_ea = map.ea + (range.begin - map.io);
+        const std::size_t size = static_cast<std::size_t>(range.end - range.begin);
+        std::vector<std::uint8_t> bytes(size);
+        if (!read_remote(process, vm_base + begin_ea, bytes.data(), bytes.size()))
+        {
+            std::wcerr << L"[!] Could not read " << profile->game_name << L" RendererRing buffer " << buffer_index
+                       << L" at EA 0x" << std::hex << begin_ea << std::dec << L"; skipping it.\n";
+            continue;
+        }
+        ++buffers_read;
+
+        std::size_t buffer_textures = 0;
+        for (std::size_t pos = 0; pos + 32 <= bytes.size() && texture_count < opt.max_textures; pos += 4)
+        {
+            auto r = parse_rsx_texture_block(bytes.data() + pos, bytes.size() - pos,
+                                             begin_ea + static_cast<std::uint32_t>(pos),
+                                             range.begin + static_cast<std::uint32_t>(pos), maps);
+            if (!r) continue;
+
+            r->pitch = find_control3_pitch_for_texture(bytes.data(), bytes.size(), pos,
+                                                       r->unit, r->format, r->width);
+            if (r->pitch)
+            {
+                TextureDesc sized{};
+                sized.format = r->format;
+                sized.width = r->width;
+                sized.height = r->height;
+                sized.depth = 1;
+                sized.pitch = r->pitch;
+                r->estimated_size = estimate_size(sized);
+            }
+
+            std::array<std::uint8_t, 16> probe{};
+            if (!read_remote(process, vm_base + r->data_ea, probe.data(), probe.size())) continue;
+            const auto key = std::make_tuple(r->location, r->offset, r->format, r->width, r->height);
+            if (!seen.insert(key).second) continue;
+
+            const std::size_t idx = texture_count++;
+            ++buffer_textures;
+            bool dumped = false;
+            const std::uint64_t remaining = opt.dump_budget_bytes - std::min(opt.dump_budget_bytes, dumped_bytes);
+            if (!opt.list_only && r->estimated_size <= remaining)
+            {
+                dumped = dump_rsx_payload(process, vm_base, *r, opt.out_dir, idx, opt.preview_variants);
+                if (dumped)
+                {
+                    ++dumped_count;
+                    dumped_bytes += r->estimated_size;
+                }
+            }
+
+            csv << idx
+                << ',' << buffer_index
+                << ",0x" << hex8(r->command_ea)
+                << ",0x" << hex8(r->io_offset)
+                << ',' << static_cast<unsigned>(r->unit)
+                << ",0x" << hex8(r->data_ea)
+                << ',' << static_cast<unsigned>(r->location)
+                << ",0x" << hex8(r->offset)
+                << ",0x" << hex2(r->format)
+                << ',' << r->mipmap
+                << ',' << static_cast<unsigned>(r->dimension)
+                << ',' << static_cast<unsigned>(r->cubemap)
+                << ',' << r->width << ',' << r->height << ',' << r->pitch
+                << ",0x" << hex8(r->header)
+                << ",0x" << hex8(r->format_reg)
+                << ",0x" << hex8(r->address)
+                << ",0x" << hex8(r->control0)
+                << ",0x" << hex8(r->control1)
+                << ",0x" << hex8(r->filter)
+                << ",0x" << hex8(r->image_rect)
+                << ",0x" << hex8(r->border_color)
+                << ',' << r->estimated_size
+                << ',' << (dumped ? "yes" : "no") << '\n';
+        }
+
+        std::wcout << L"    RendererRing[" << buffer_index << L"] IO 0x" << std::hex << range.begin
+                   << L"..0x" << range.end << std::dec << L": " << buffer_textures
+                   << L" unique texture binding(s)\n";
+    }
+
+    std::wcout << L"[+] " << profile->game_name << L" RendererRing buffers read: " << buffers_read << L"/" << ring.size() << L"\n";
+    std::wcout << L"[+] " << profile->game_name << L" RendererRing unique texture bindings: " << texture_count << L"\n";
+    if (!opt.list_only)
+        std::wcout << L"[+] " << profile->game_name << L" RendererRing payloads dumped: " << dumped_count << L" ("
+                   << (dumped_bytes / (1024 * 1024)) << L" MB)\n";
+    std::wcout << L"[+] RendererRing manifest: " << (opt.out_dir / L"renderer_ring_textures.csv") << L"\n";
+    return 0;
+}
+
 static bool recent_primary_has_socom_call(HANDLE process, std::uintptr_t vm_base, const IoMap& map,
                                           std::uint32_t put, std::uint64_t history_bytes)
 {
@@ -1194,6 +1303,16 @@ static bool recent_primary_has_socom_call(HANDLE process, std::uintptr_t vm_base
 static int capture_active_fifo(HANDLE process, std::uintptr_t vm_base, const Options& opt,
                                const std::vector<IoMap>& maps)
 {
+    // MAG's Deep Capture is intentionally independent of the instantaneous
+    // primary FIFO GET/PUT window. Scan the complete RendererRing first so a
+    // wrapped primary FIFO cannot prevent the useful texture inventory pass.
+    const bool renderer_ring_deep = opt.renderer_ring && is_renderer_ring_profile(opt.profile);
+    if (renderer_ring_deep)
+    {
+        const int ring_result = capture_renderer_ring(process, vm_base, opt, maps);
+        if (ring_result != 0) return ring_result;
+    }
+
     std::array<std::uint8_t, 12> control{};
     std::uint32_t put = 0;
     std::uint32_t get = 0;
@@ -1257,6 +1376,11 @@ static int capture_active_fifo(HANDLE process, std::uintptr_t vm_base, const Opt
                        << L", PUT=0x" << put << std::dec << L").\n"
                        << L"[!] Ring-boundary reconstruction is intentionally not guessed; no safe linear window was captured after "
                        << opt.fifo_samples << L" attempts (" << wrapped_samples << L" wrapped sample(s)).\n";
+            if (renderer_ring_deep)
+            {
+                std::wcout << L"[*] MAG RendererRing Deep Capture completed successfully; skipping only the wrapped primary FIFO snapshot.\n";
+                return 0;
+            }
             return 12;
         }
 
@@ -1379,15 +1503,16 @@ static int capture_active_fifo(HANDLE process, std::uintptr_t vm_base, const Opt
         // CellGcmContextData buffers. Their CALL words are ordinary RSX FIFO CALLs:
         // target IO offset with low bits == 2. Keep this deliberately profile-specific
         // until another title gives us equally strong context-range evidence.
-        const std::map<std::uint32_t, std::uint32_t> socom_secondary_sizes =
+        std::map<std::uint32_t, std::uint32_t> socom_secondary_sizes;
+        if (const auto* profile = profiles::find(opt.profile);
+            profile && profile->deep_capture == profiles::DeepCaptureKind::socom_secondary_calls)
         {
-            {0x0216C580u, 0x00028000u},
-            {0x02194600u, 0x00028000u},
-            {0x021BC680u, 0x00028000u},
-            {0x021E4700u, 0x00008000u},
-            {0x021EC780u, 0x00008000u},
-            {0x021F4800u, 0x00008000u},
-        };
+            for (std::size_t i = 0; i < profile->deep_buffer_count; ++i)
+            {
+                const auto& range = profile->deep_buffers[i];
+                socom_secondary_sizes.emplace(range.begin, range.end - range.begin);
+            }
+        }
         std::map<std::uint32_t, std::uint32_t> last_call_site;
 
         for (std::size_t i = 0; i + 4 <= history.size();)
@@ -1796,6 +1921,8 @@ static void usage()
         L"  --fifo-scan          Find moving CellGcmControl/context state (live FIFO diagnostic)\n"
         L"  --fifo-capture       Snapshot the active primary GET-to-PUT FIFO window\n"
         L"  --fifo-follow-calls  Dump confirmed SOCOM4 secondary buffers called by recent FIFO history\n"
+        L"  --renderer-ring      Scan RendererRing buffers configured by the selected profile\n"
+        L"  --mag-renderer-ring  Legacy alias for --renderer-ring\n"
         L"  --control-ea HEX     CellGcmControl guest EA (profile default when known)\n"
         L"  --fifo-history-mb N  Recent executed bytes to keep before GET (default 2 MB)\n"
         L"  --fifo-sample-ms N   Delay between FIFO samples/capture retries (default 250 ms)\n"
@@ -1830,6 +1957,7 @@ static bool parse_args(int argc, wchar_t** argv, Options& o)
         if (a == L"--fifo-scan") { o.fifo_scan = true; continue; }
         if (a == L"--fifo-capture") { o.fifo_capture = true; continue; }
         if (a == L"--fifo-follow-calls") { o.fifo_follow_calls = true; continue; }
+        if (a == L"--renderer-ring" || a == L"--mag-renderer-ring") { o.renderer_ring = true; continue; }
         if (a == L"--tile-scan") { o.tile_scan = true; continue; }
         if (a == L"--descriptor-scan") { o.rsx_scan = false; continue; }
         if (a == L"--process") { if (const auto* v = need(L"--process")) o.process = v; else return false; continue; }
@@ -2013,15 +2141,9 @@ int cli_main(int argc, wchar_t** argv)
     {
         if (!opt.control_ea)
         {
-            std::wstring p = opt.profile;
-            std::transform(p.begin(), p.end(), p.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towupper(c)); });
-            if (p == L"BCUS98135" || p == L"SOCOM4" || p == L"SOCOM 4")
-                opt.control_ea = 0x50100040u;
-            else if (p == L"BCUS98110" || p == L"MAG")
-                // mage_g.self's RSX context is mapped at 0x60100000. The
-                // CellGcmControl DMA block uses the same +0x40 layout already
-                // validated by the SOCOM profile.
-                opt.control_ea = 0x60100040u;
+            const auto* profile = profiles::find(opt.profile);
+            if (profile && profile->control_ea)
+                opt.control_ea = profile->control_ea;
             else
             {
                 std::wcerr << L"[!] --fifo-capture needs --control-ea for this profile.\n";

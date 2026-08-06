@@ -5,6 +5,7 @@ add_executable(RPCS3TextureDumper WIN32
     src/entry.cpp
     src/main.cpp
     src/modules/gui.cpp
+    src/modules/profiles.cpp
     src/modules/preview.cpp
 )
 target_compile_features(RPCS3TextureDumper PRIVATE cxx_std_20)

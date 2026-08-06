@@ -5,6 +5,7 @@ $sources = @(
     (Join-Path $projectRoot "src\entry.cpp")
     (Join-Path $projectRoot "src\main.cpp")
     (Join-Path $projectRoot "src\modules\gui.cpp")
+    (Join-Path $projectRoot "src\modules\profiles.cpp")
     (Join-Path $projectRoot "src\modules\preview.cpp")
 )
 $buildDir = Join-Path $projectRoot "build"

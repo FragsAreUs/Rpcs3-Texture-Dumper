@@ -101,9 +101,11 @@ build\RPCS3TextureDumper.exe
 The GUI is intentionally focused on texture dumping only. It exposes:
 
 - selectable SOCOM 4 / `BCUS98135` v01.00 and MAG / `BCUS98110` v02.12 profiles
+- centralized `src/modules/profiles.*` registry for per-game identity, RSX maps,
+  CellGcmControl address and Deep Capture command-buffer configuration
 - output-root folder picker
 - **Dump Textures**, **Stop**, and **Open Output Folder** buttons
-- deep texture capture, which follows the confirmed secondary command buffers automatically
+- profile-aware deep texture capture: SOCOM 4 follows its confirmed secondary command buffers, while MAG scans its five confirmed RendererRing allocations automatically
 - automatic GUI capture tuning; budget, recent-history size, sample/delay, and maximum-texture controls remain CLI diagnostics
 - optional orientation diagnostic previews; normal BMP output uses the user-confirmed Flip-Y orientation
 - a live capture log
@@ -231,6 +233,8 @@ no zlib dependency.
 --fifo-scan               Find moving CellGcmControl/context state (recommended next SOCOM 4 test)
 --fifo-capture            Snapshot the active primary GET-to-PUT FIFO window
 --fifo-follow-calls       Dump confirmed SOCOM 4 secondary buffers called by recent history
+--renderer-ring           Scan RendererRing buffers configured by the selected profile
+--mag-renderer-ring       Legacy alias for --renderer-ring
 --control-ea HEX          Override CellGcmControl EA (SOCOM 4 default: 0x50100040)
 --fifo-history-mb N       Recently executed FIFO history before GET (default: 2 MB; max: 64)
 --fifo-sample-ms N        Delay between FIFO snapshots/capture retries (default: 250 ms; range: 16..5000)
@@ -244,7 +248,7 @@ no zlib dependency.
 
 For SOCOM 4, the built-in profile contains the mappings confirmed across the supplied logs, including IO `0x00000000 -> EA 0x40000000` and IO `0x03600000 -> EA 0x43600000`. Other titles can still learn mappings from a completed RPCS3 log.
 
-For MAG `BCUS98110` v02.12, the supplied runtime log confirms the renderer's post-launch `mage_g.self` RSX mappings: IO `0x00000000 -> EA 0x50000000` for `0x02300000` bytes and IO `0x0E000000 -> EA 0x34E00000` for `0x00100000` bytes. Its RSX context maps at `0x60100000`, giving the profile a `CellGcmControl` EA of `0x60100040`. MAG's TTY also reports five renderer command-buffer ranges from IO `0x00001000` through `0x00200000`. Those ranges are documented evidence only for now; SOCOM's `--fifo-follow-calls` logic is intentionally not applied to MAG until the MAG ring/call behavior is captured and validated.
+For MAG `BCUS98110` v02.12, the supplied runtime log confirms the renderer's post-launch `mage_g.self` RSX mappings: IO `0x00000000 -> EA 0x50000000` for `0x02300000` bytes and IO `0x0E000000 -> EA 0x34E00000` for `0x00100000` bytes. Its RSX context maps at `0x60100000`, giving the profile a `CellGcmControl` EA of `0x60100040`. MAG's TTY reports five RendererRing command-buffer ranges: `0x001000..0x0A4000`, `0x0A4000..0x0D3000`, `0x0D3000..0x11B000`, `0x11B000..0x197000` and `0x197000..0x200000`. `--renderer-ring` scans the allocations stored by the selected profile directly on each Deep Capture. The supplied 218-BMP sample contained bindings from only buffers 0 and 3, demonstrating why active-FIFO-only capture was sensitive to camera movement. Ring scanning intentionally accepts cached command-buffer contents when they still reference readable textures; GUI publication removes byte-identical BMP duplicates.
 
 ## Expected limitations
 

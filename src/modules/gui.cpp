@@ -1,4 +1,5 @@
 #include "gui.hpp"
+#include "profiles.hpp"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -54,6 +55,7 @@ struct State
     HWND stop = nullptr;
     HWND log = nullptr;
     HWND status = nullptr;
+    HWND profile = nullptr;
     PROCESS_INFORMATION child{};
     HANDLE pipe_read = nullptr;
     fs::path profile_output;
@@ -73,18 +75,27 @@ std::wstring exe_path()
 
 std::wstring default_output_path()
 {
-    return (fs::path(exe_path()).parent_path() / L"dumps" / L"BCUS98135").wstring();
+    return (fs::path(exe_path()).parent_path() / L"dumps" / profiles::default_profile().id).wstring();
+}
+
+const profiles::GameProfile& selected_profile()
+{
+    if (!g.profile) return profiles::default_profile();
+    const LRESULT selected = SendMessageW(g.profile, CB_GETCURSEL, 0, 0);
+    const auto available = profiles::all();
+    if (selected == CB_ERR || static_cast<std::size_t>(selected) >= available.size())
+        return profiles::default_profile();
+    return available[static_cast<std::size_t>(selected)];
 }
 
 std::wstring selected_profile_id()
 {
-    const HWND profile = GetDlgItem(g.window, ID_PROFILE);
-    return SendMessageW(profile, CB_GETCURSEL, 0, 0) == 1 ? L"BCUS98110" : L"BCUS98135";
+    return std::wstring(selected_profile().id);
 }
 
 std::wstring selected_profile_name()
 {
-    return selected_profile_id() == L"BCUS98110" ? L"MAG" : L"SOCOM 4";
+    return std::wstring(selected_profile().game_name);
 }
 
 std::wstring default_output_path_for_selected_profile()
@@ -95,10 +106,12 @@ std::wstring default_output_path_for_selected_profile()
 void refresh_profile_ui()
 {
     if (!g.window) return;
-    const std::wstring game = selected_profile_name();
-    EnableWindow(GetDlgItem(g.window, ID_DEEP), selected_profile_id() == L"BCUS98135");
+    const auto& profile = selected_profile();
+    EnableWindow(GetDlgItem(g.window, ID_DEEP), profile.deep_capture != profiles::DeepCaptureKind::none);
     SetWindowTextW(g.output, default_output_path_for_selected_profile().c_str());
+    const std::wstring game(profile.game_name);
     SetWindowTextW(g.status, (L"Ready - start RPCS3 and load " + game + L".").c_str());
+    SetWindowTextW(g.window, (L"RPCS3 Texture Dumper - " + game).c_str());
 }
 
 std::wstring worker_run_name()
@@ -394,15 +407,19 @@ bool launch_dump()
     }
 
     const std::wstring exe = exe_path();
-    const std::wstring profile_id = selected_profile_id();
-    const std::wstring profile_name = selected_profile_name();
+    const auto& profile = selected_profile();
+    const std::wstring profile_id(profile.id);
+    const std::wstring profile_name(profile.game_name);
     std::wostringstream cmd;
     cmd << quote(exe)
         << L" --profile " << profile_id << L" --fifo-capture --dump --auto-tune"
         << L" --out " << quote(g.worker_output.wstring());
-    if (profile_id == L"BCUS98135" &&
+    if (profile.deep_capture == profiles::DeepCaptureKind::socom_secondary_calls &&
         SendMessageW(GetDlgItem(g.window, ID_DEEP), BM_GETCHECK, 0, 0) == BST_CHECKED)
         cmd << L" --fifo-follow-calls";
+    if (profile.deep_capture == profiles::DeepCaptureKind::renderer_ring &&
+        SendMessageW(GetDlgItem(g.window, ID_DEEP), BM_GETCHECK, 0, 0) == BST_CHECKED)
+        cmd << L" --renderer-ring";
     if (SendMessageW(GetDlgItem(g.window, ID_VARIANTS), BM_GETCHECK, 0, 0) == BST_CHECKED)
         cmd << L" --preview-variants";
 
@@ -429,9 +446,9 @@ bool launch_dump()
 
     SetWindowTextW(g.log, L"");
     append_log(L"RPCS3 Texture Dumper - " + profile_name + L"\r\nOutput: " + g.profile_output.wstring() + L"\r\nStarting capture...\r\n");
-    if (profile_id == L"BCUS98110" &&
+    if (profile.deep_capture == profiles::DeepCaptureKind::renderer_ring &&
         SendMessageW(GetDlgItem(g.window, ID_DEEP), BM_GETCHECK, 0, 0) == BST_CHECKED)
-        append_log(L"[*] MAG uses primary FIFO capture; secondary ring following is not enabled until its call path is validated.\r\n");
+        append_log(L"[*] Deep Capture scans every configured RendererRing command buffer for this profile.\r\n");
     append_log(L"\r\n");
     set_running(true);
     std::thread(reader_thread, g.pipe_read, g.child.hProcess, g.window).detach();
@@ -475,13 +492,16 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
         };
 
         add(L"STATIC", L"RPCS3 Texture Dumper", SS_LEFT, 18, 14, 260, 22, -1);
-        g.status = add(L"STATIC", L"Ready - start RPCS3 and load SOCOM 4.", SS_LEFT, 18, 39, 650, 20, ID_STATUS);
+        g.status = add(L"STATIC", L"Ready - start RPCS3 and load a supported game.", SS_LEFT, 18, 39, 650, 20, ID_STATUS);
 
         add(L"STATIC", L"Game profile", SS_LEFT, 18, 72, 100, 20, -1);
-        HWND profile = add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL, 122, 68, 250, 200, ID_PROFILE);
-        SendMessageW(profile, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"SOCOM 4 - BCUS98135 v01.00"));
-        SendMessageW(profile, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"MAG - BCUS98110 v02.12"));
-        SendMessageW(profile, CB_SETCURSEL, 0, 0);
+        g.profile = add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 122, 68, 300, 240, ID_PROFILE);
+        for (const auto& profile : profiles::all())
+        {
+            const std::wstring label(profile.display_name);
+            SendMessageW(g.profile, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        }
+        SendMessageW(g.profile, CB_SETCURSEL, 0, 0);
 
         add(L"STATIC", L"Output folder", SS_LEFT, 18, 106, 100, 20, -1);
         g.output = add(L"EDIT", default_output_path().c_str(), WS_BORDER | ES_AUTOHSCROLL, 122, 102, 505, 24, ID_OUTPUT);
@@ -501,6 +521,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
         add(L"STATIC", L"Capture log", SS_LEFT, 18, 258, 100, 20, -1);
         g.log = add(L"EDIT", L"", WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL,
                     18, 280, 710, 273, ID_LOG);
+        refresh_profile_ui();
         return 0;
     }
     case WM_SIZE:
