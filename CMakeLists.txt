@@ -2,11 +2,17 @@ cmake_minimum_required(VERSION 3.20)
 project(RPCS3TextureDumper LANGUAGES CXX)
 
 add_executable(RPCS3TextureDumper WIN32
+    src/cli.cpp
     src/entry.cpp
-    src/main.cpp
+    src/modules/capture_engine.cpp
+    src/modules/diagnostics.cpp
     src/modules/gui.cpp
+    src/modules/options.cpp
+    src/modules/process_memory.cpp
     src/modules/profiles.cpp
     src/modules/preview.cpp
+    src/modules/rsx_maps.cpp
+    src/modules/rsx_texture.cpp
 )
 target_compile_features(RPCS3TextureDumper PRIVATE cxx_std_20)
 target_compile_definitions(RPCS3TextureDumper PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)

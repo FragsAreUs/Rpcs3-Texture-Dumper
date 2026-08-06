@@ -118,6 +118,15 @@ The GUI launches the same EXE with the proven CLI capture arguments using redire
 
 The worker process only opens RPCS3 for query/read access. Stopping the capture terminates only that read-only worker, not RPCS3. Developers can still invoke CLI switches explicitly from PowerShell when collecting RSX/FIFO diagnostics.
 
+The CLI is an orchestration layer rather than a capture monolith:
+
+- `options.*` parses and validates CLI settings.
+- `process_memory.*` owns RPCS3 discovery, handles, VM-base detection, and reads.
+- `rsx_maps.*` resolves profile/log IO mappings.
+- `rsx_texture.*` owns reusable texture packet parsing, pitch, sizing, and dumps.
+- `diagnostics.*` contains broad GCM/RSX investigative scans.
+- `capture_engine.*` contains the supported live capture strategies.
+
 For the confirmed SOCOM 4 profile, GUI `--auto-tune` currently uses a 1 GiB
 temporary payload budget, an 8 MiB recent-FIFO window, up to 100 samples at
 100 ms intervals, and a 4096-candidate ceiling. The FIFO loop exits as soon as

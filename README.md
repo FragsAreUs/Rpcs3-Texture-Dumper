@@ -12,6 +12,8 @@ Current built-in profiles are **SOCOM 4: U.S. Navy SEALs — BCUS98135 v01.00** 
 - Built-in SOCOM 4 and MAG RSX memory profiles.
 - Supported games are registered in the dedicated `src/modules/profiles.*`
   module, so adding a profile does not require hard-coded GUI selection logic.
+- Process access, RSX mapping, texture parsing, capture strategies, diagnostics,
+  previews, options, and GUI code are separated into focused modules.
 - Automatic capture tuning in the GUI; no budget/history/sample/delay/max values to guess.
 - Deep texture capture is profile-aware: SOCOM 4 follows its confirmed secondary RSX command buffers, while MAG scans all five TTY-confirmed RendererRing command-buffer ranges in one capture instead of waiting for GET/PUT to visit them.
 - Dumps BC1/DXT1, BC2/DXT23 and BC3/DXT45 textures to viewable `.bmp` files.

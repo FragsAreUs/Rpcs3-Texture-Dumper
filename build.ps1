@@ -2,11 +2,17 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = $PSScriptRoot
 $sources = @(
+    (Join-Path $projectRoot "src\cli.cpp")
     (Join-Path $projectRoot "src\entry.cpp")
-    (Join-Path $projectRoot "src\main.cpp")
+    (Join-Path $projectRoot "src\modules\capture_engine.cpp")
+    (Join-Path $projectRoot "src\modules\diagnostics.cpp")
     (Join-Path $projectRoot "src\modules\gui.cpp")
+    (Join-Path $projectRoot "src\modules\options.cpp")
+    (Join-Path $projectRoot "src\modules\process_memory.cpp")
     (Join-Path $projectRoot "src\modules\profiles.cpp")
     (Join-Path $projectRoot "src\modules\preview.cpp")
+    (Join-Path $projectRoot "src\modules\rsx_maps.cpp")
+    (Join-Path $projectRoot "src\modules\rsx_texture.cpp")
 )
 $buildDir = Join-Path $projectRoot "build"
 $output = Join-Path $buildDir "RPCS3TextureDumper.exe"
