@@ -8,7 +8,8 @@ working RSX capture code in `main.cpp`.
   invisible CLI worker mode, captures output, and owns folder/workflow UI only.
   The worker uses a per-run temporary directory; the GUI publishes only `.bmp`
   files directly into the user-selected profile folder and then removes its temporary
-  raw/FIFO/CSV diagnostics.
+  raw/FIFO/CSV diagnostics. Publication also rejects byte-for-byte duplicate BMPs
+  already present in the profile folder or earlier in the same capture.
 - `../entry.cpp` - Windows GUI-subsystem entry point. No console is created when
   the tool is launched normally; arguments are routed to the internal CLI
   engine. The GUI invokes that same engine with `CREATE_NO_WINDOW`, so there is

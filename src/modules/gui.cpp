@@ -5,11 +5,17 @@
 #include <shlobj.h>
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
+#include <cstring>
 #include <cwchar>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_map>
+#include <vector>
 
 #ifdef _MSC_VER
 #pragma comment(lib, "user32.lib")
@@ -162,32 +168,139 @@ void cleanup_worker_output()
     g.worker_output.clear();
 }
 
-std::size_t publish_bmp_output()
+struct PublishResult
 {
-    if (g.worker_output.empty() || g.profile_output.empty()) return 0;
+    std::size_t published = 0;
+    std::size_t duplicates = 0;
+};
+
+bool fingerprint_file(const fs::path& path, std::uint64_t& fingerprint)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return false;
+
+    // FNV-1a is used only to find likely duplicate candidates. A full
+    // byte-for-byte comparison below is always required before a BMP is skipped.
+    std::uint64_t hash = 14695981039346656037ull;
+    constexpr std::uint64_t prime = 1099511628211ull;
+    std::array<char, 64 * 1024> buffer{};
+
+    while (in)
+    {
+        in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        const std::streamsize count = in.gcount();
+        for (std::streamsize i = 0; i < count; ++i)
+        {
+            hash ^= static_cast<unsigned char>(buffer[static_cast<std::size_t>(i)]);
+            hash *= prime;
+        }
+    }
+
+    if (!in.eof()) return false;
+    fingerprint = hash;
+    return true;
+}
+
+bool files_are_identical(const fs::path& a, const fs::path& b)
+{
+    std::error_code ec;
+    const std::uintmax_t size_a = fs::file_size(a, ec);
+    if (ec) return false;
+    const std::uintmax_t size_b = fs::file_size(b, ec);
+    if (ec || size_a != size_b) return false;
+
+    std::ifstream left(a, std::ios::binary);
+    std::ifstream right(b, std::ios::binary);
+    if (!left || !right) return false;
+
+    std::array<char, 64 * 1024> left_buffer{};
+    std::array<char, 64 * 1024> right_buffer{};
+    std::uintmax_t remaining = size_a;
+    while (remaining != 0)
+    {
+        const std::size_t chunk = static_cast<std::size_t>(std::min<std::uintmax_t>(remaining, left_buffer.size()));
+        left.read(left_buffer.data(), static_cast<std::streamsize>(chunk));
+        right.read(right_buffer.data(), static_cast<std::streamsize>(chunk));
+        const std::streamsize left_count = left.gcount();
+        const std::streamsize right_count = right.gcount();
+        if (left_count != static_cast<std::streamsize>(chunk) || right_count != static_cast<std::streamsize>(chunk))
+            return false;
+        if (std::memcmp(left_buffer.data(), right_buffer.data(), chunk) != 0)
+            return false;
+        remaining -= chunk;
+    }
+    return true;
+}
+
+using BmpIndex = std::unordered_map<std::uint64_t, std::vector<fs::path>>;
+
+bool is_known_duplicate(const fs::path& candidate, std::uint64_t fingerprint, const BmpIndex& index)
+{
+    const auto found = index.find(fingerprint);
+    if (found == index.end()) return false;
+    for (const fs::path& existing : found->second)
+    {
+        if (files_are_identical(candidate, existing)) return true;
+    }
+    return false;
+}
+
+PublishResult publish_bmp_output()
+{
+    PublishResult result{};
+    if (g.worker_output.empty() || g.profile_output.empty()) return result;
     std::error_code ec;
     fs::create_directories(g.profile_output, ec);
     if (ec)
     {
         cleanup_worker_output();
-        return 0;
+        return result;
     }
 
-    std::size_t copied = 0;
+    // Index every BMP already published for this profile so repeat captures do
+    // not create another file for identical image contents.
+    BmpIndex known_bmps;
+    for (fs::directory_iterator it(g.profile_output, ec), end; !ec && it != end; it.increment(ec))
+    {
+        std::error_code item_ec;
+        if (!it->is_regular_file(item_ec) || item_ec) continue;
+        const fs::path existing = it->path();
+        if (_wcsicmp(existing.extension().c_str(), L".bmp") != 0) continue;
+        std::uint64_t fingerprint = 0;
+        if (fingerprint_file(existing, fingerprint))
+            known_bmps[fingerprint].push_back(existing);
+    }
+    ec.clear();
+
     for (fs::directory_iterator it(g.worker_output, ec), end; !ec && it != end; it.increment(ec))
     {
-        if (!it->is_regular_file(ec)) continue;
-        const fs::path& src = it->path();
+        std::error_code item_ec;
+        if (!it->is_regular_file(item_ec) || item_ec) continue;
+        const fs::path src = it->path();
         if (_wcsicmp(src.extension().c_str(), L".bmp") != 0) continue;
-        fs::copy_file(src, g.profile_output / src.filename(), fs::copy_options::overwrite_existing, ec);
-        if (!ec) ++copied;
-        ec.clear();
+
+        std::uint64_t fingerprint = 0;
+        const bool fingerprinted = fingerprint_file(src, fingerprint);
+        if (fingerprinted && is_known_duplicate(src, fingerprint, known_bmps))
+        {
+            ++result.duplicates;
+            continue;
+        }
+
+        const fs::path destination = g.profile_output / src.filename();
+        std::error_code copy_ec;
+        fs::copy_file(src, destination, fs::copy_options::overwrite_existing, copy_ec);
+        if (copy_ec) continue;
+
+        ++result.published;
+        if (fingerprinted)
+            known_bmps[fingerprint].push_back(destination);
     }
 
     // The public profile folder receives BMPs only; discard the worker's
     // manifests, FIFO captures and raw payloads after publishing previews.
     cleanup_worker_output();
-    return copied;
+    return result;
 }
 
 void reader_thread(HANDLE pipe, HANDLE process, HWND window)
@@ -412,11 +525,13 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
     case WM_DUMPER_DONE:
     {
         const DWORD code = static_cast<DWORD>(wparam);
-        const std::size_t bmp_count = publish_bmp_output();
+        const PublishResult publish = publish_bmp_output();
         std::wostringstream ss;
         ss << L"\r\n" << (code == 0 ? L"[+] Texture capture finished successfully.\r\n" : L"[!] Texture capture exited with code ") ;
         if (code != 0) ss << code << L".\r\n";
-        ss << L"[+] Published " << bmp_count << L" BMP texture(s) to:\r\n    " << g.profile_output.wstring() << L"\r\n";
+        ss << L"[+] Published " << publish.published << L" new BMP texture(s) to:\r\n    " << g.profile_output.wstring() << L"\r\n";
+        if (publish.duplicates != 0)
+            ss << L"[*] Skipped " << publish.duplicates << L" duplicate BMP texture(s).\r\n";
         append_log(ss.str());
         finish_child();
         return 0;

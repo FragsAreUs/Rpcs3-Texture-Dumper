@@ -15,6 +15,7 @@ The current version is built and tested around **SOCOM 4: U.S. Navy SEALs — BC
 - SOCOM 4 textures are automatically Flip-Y corrected for normal viewing.
 - GUI output contains **BMP files only**.
 - Textures are saved directly to the selected game/profile folder with no per-capture subfolders.
+- Byte-for-byte duplicate BMPs are skipped both within the current capture and when the same image already exists in the profile folder.
 - Contains a hidden CLI capture engine used internally by the GUI and available from PowerShell for advanced RSX/FIFO diagnostics.
 
 ## Building

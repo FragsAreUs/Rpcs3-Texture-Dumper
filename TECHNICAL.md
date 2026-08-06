@@ -119,7 +119,7 @@ dumps\
     tex_0001_....bmp
 ```
 
-Only BMPs are published into GUI profile folders. Repeated captures reuse the same profile folder; a texture with the same generated filename is refreshed in place. The worker's raw `.bin`, FIFO and CSV data lives under the system temporary directory during the capture and is removed when publishing finishes. Direct CLI use keeps the existing raw/CSV diagnostic behavior for reverse-engineering work.
+Only BMPs are published into GUI profile folders. Before publication, the GUI indexes BMPs already in the profile folder and the BMPs accepted earlier in the current run. A fast content fingerprint narrows duplicate candidates, then a full byte-for-byte comparison confirms equality before a file is skipped. This prevents different RSX descriptor addresses from producing multiple copies of the same decoded image without relying on the fingerprint alone. Existing files are never deleted by deduplication. Repeated captures reuse the same profile folder; a texture with the same generated filename is refreshed in place when its contents differ. The worker's raw `.bin`, FIFO and CSV data lives under the system temporary directory during the capture and is removed when publishing finishes. Direct CLI use keeps the existing raw/CSV diagnostic behavior for reverse-engineering work.
 
 This layout is designed for the eventual standalone tool: move the statically linked EXE to its own folder and it will create/manage its dump folders relative to itself. No RPCS3 installation path is required; the tool finds the running `rpcs3.exe` process.
 
