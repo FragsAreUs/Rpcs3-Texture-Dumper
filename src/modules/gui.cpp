@@ -35,6 +35,7 @@ constexpr UINT WM_DUMPER_DONE = WM_APP + 2;
 enum ControlId
 {
     ID_OUTPUT = 100,
+    ID_PROFILE,
     ID_BROWSE,
     ID_DUMP,
     ID_STOP,
@@ -73,6 +74,31 @@ std::wstring exe_path()
 std::wstring default_output_path()
 {
     return (fs::path(exe_path()).parent_path() / L"dumps" / L"BCUS98135").wstring();
+}
+
+std::wstring selected_profile_id()
+{
+    const HWND profile = GetDlgItem(g.window, ID_PROFILE);
+    return SendMessageW(profile, CB_GETCURSEL, 0, 0) == 1 ? L"BCUS98110" : L"BCUS98135";
+}
+
+std::wstring selected_profile_name()
+{
+    return selected_profile_id() == L"BCUS98110" ? L"MAG" : L"SOCOM 4";
+}
+
+std::wstring default_output_path_for_selected_profile()
+{
+    return (fs::path(exe_path()).parent_path() / L"dumps" / selected_profile_id()).wstring();
+}
+
+void refresh_profile_ui()
+{
+    if (!g.window) return;
+    const std::wstring game = selected_profile_name();
+    EnableWindow(GetDlgItem(g.window, ID_DEEP), selected_profile_id() == L"BCUS98135");
+    SetWindowTextW(g.output, default_output_path_for_selected_profile().c_str());
+    SetWindowTextW(g.status, (L"Ready - start RPCS3 and load " + game + L".").c_str());
 }
 
 std::wstring worker_run_name()
@@ -142,7 +168,8 @@ void set_running(bool running)
     g.running = running;
     EnableWindow(g.dump, !running);
     EnableWindow(g.stop, running);
-    SetWindowTextW(g.status, running ? L"Capturing textures from RPCS3..." : L"Ready - start RPCS3 and load SOCOM 4.");
+    const std::wstring ready = L"Ready - start RPCS3 and load " + selected_profile_name() + L".";
+    SetWindowTextW(g.status, running ? L"Capturing textures from RPCS3..." : ready.c_str());
 }
 
 void finish_child()
@@ -367,11 +394,14 @@ bool launch_dump()
     }
 
     const std::wstring exe = exe_path();
+    const std::wstring profile_id = selected_profile_id();
+    const std::wstring profile_name = selected_profile_name();
     std::wostringstream cmd;
     cmd << quote(exe)
-        << L" --profile BCUS98135 --fifo-capture --dump --auto-tune"
+        << L" --profile " << profile_id << L" --fifo-capture --dump --auto-tune"
         << L" --out " << quote(g.worker_output.wstring());
-    if (SendMessageW(GetDlgItem(g.window, ID_DEEP), BM_GETCHECK, 0, 0) == BST_CHECKED)
+    if (profile_id == L"BCUS98135" &&
+        SendMessageW(GetDlgItem(g.window, ID_DEEP), BM_GETCHECK, 0, 0) == BST_CHECKED)
         cmd << L" --fifo-follow-calls";
     if (SendMessageW(GetDlgItem(g.window, ID_VARIANTS), BM_GETCHECK, 0, 0) == BST_CHECKED)
         cmd << L" --preview-variants";
@@ -398,7 +428,11 @@ bool launch_dump()
     }
 
     SetWindowTextW(g.log, L"");
-    append_log(L"RPCS3 Texture Dumper - SOCOM 4\r\nOutput: " + g.profile_output.wstring() + L"\r\nStarting capture...\r\n\r\n");
+    append_log(L"RPCS3 Texture Dumper - " + profile_name + L"\r\nOutput: " + g.profile_output.wstring() + L"\r\nStarting capture...\r\n");
+    if (profile_id == L"BCUS98110" &&
+        SendMessageW(GetDlgItem(g.window, ID_DEEP), BM_GETCHECK, 0, 0) == BST_CHECKED)
+        append_log(L"[*] MAG uses primary FIFO capture; secondary ring following is not enabled until its call path is validated.\r\n");
+    append_log(L"\r\n");
     set_running(true);
     std::thread(reader_thread, g.pipe_read, g.child.hProcess, g.window).detach();
     return true;
@@ -444,16 +478,16 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
         g.status = add(L"STATIC", L"Ready - start RPCS3 and load SOCOM 4.", SS_LEFT, 18, 39, 650, 20, ID_STATUS);
 
         add(L"STATIC", L"Game profile", SS_LEFT, 18, 72, 100, 20, -1);
-        HWND profile = add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL, 122, 68, 250, 200, -1);
+        HWND profile = add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL, 122, 68, 250, 200, ID_PROFILE);
         SendMessageW(profile, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"SOCOM 4 - BCUS98135 v01.00"));
+        SendMessageW(profile, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"MAG - BCUS98110 v02.12"));
         SendMessageW(profile, CB_SETCURSEL, 0, 0);
-        EnableWindow(profile, FALSE);
 
         add(L"STATIC", L"Output folder", SS_LEFT, 18, 106, 100, 20, -1);
         g.output = add(L"EDIT", default_output_path().c_str(), WS_BORDER | ES_AUTOHSCROLL, 122, 102, 505, 24, ID_OUTPUT);
         add(L"BUTTON", L"Browse...", BS_PUSHBUTTON, 636, 101, 92, 26, ID_BROWSE);
 
-        HWND deep = add(L"BUTTON", L"Deep texture capture (recommended)", BS_AUTOCHECKBOX, 18, 143, 255, 22, ID_DEEP);
+        HWND deep = add(L"BUTTON", L"Deep texture capture (when supported)", BS_AUTOCHECKBOX, 18, 143, 270, 22, ID_DEEP);
         SendMessageW(deep, BM_SETCHECK, BST_CHECKED, 0);
         add(L"BUTTON", L"Write orientation diagnostics", BS_AUTOCHECKBOX, 295, 143, 225, 22, ID_VARIANTS);
 
@@ -477,6 +511,11 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
         }
         return 0;
     case WM_COMMAND:
+        if (LOWORD(wparam) == ID_PROFILE && HIWORD(wparam) == CBN_SELCHANGE)
+        {
+            refresh_profile_ui();
+            return 0;
+        }
         switch (LOWORD(wparam))
         {
         case ID_BROWSE: choose_folder(); return 0;
@@ -555,7 +594,7 @@ int run()
     wc.lpszClassName = kClassName;
     RegisterClassExW(&wc);
 
-    HWND hwnd = CreateWindowExW(0, kClassName, L"RPCS3 Texture Dumper - SOCOM 4",
+    HWND hwnd = CreateWindowExW(0, kClassName, L"RPCS3 Texture Dumper",
                                 WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 770, 630,
                                 nullptr, nullptr, instance, nullptr);
     if (!hwnd)

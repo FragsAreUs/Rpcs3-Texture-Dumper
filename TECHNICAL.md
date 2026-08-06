@@ -100,7 +100,7 @@ build\RPCS3TextureDumper.exe
 
 The GUI is intentionally focused on texture dumping only. It exposes:
 
-- SOCOM 4 / `BCUS98135` profile selection (fixed to the confirmed profile for now)
+- selectable SOCOM 4 / `BCUS98135` v01.00 and MAG / `BCUS98110` v02.12 profiles
 - output-root folder picker
 - **Dump Textures**, **Stop**, and **Open Output Folder** buttons
 - deep texture capture, which follows the confirmed secondary command buffers automatically
@@ -217,7 +217,7 @@ no zlib dependency.
 
 ```text
 --process rpcs3.exe       Process name (default: rpcs3.exe)
---profile NAME            Built-in RSX mapping profile (BCUS98135/SOCOM4)
+--profile NAME            Built-in RSX mapping profile (BCUS98135/SOCOM4, BCUS98110/MAG)
 --log PATH                RPCS3.log path
 --out DIR                 Output directory (default: rpcs3_texture_dump)
 --guest-start HEX         Descriptor scan start EA (default: 0x00010000)
@@ -243,6 +243,8 @@ no zlib dependency.
 ```
 
 For SOCOM 4, the built-in profile contains the mappings confirmed across the supplied logs, including IO `0x00000000 -> EA 0x40000000` and IO `0x03600000 -> EA 0x43600000`. Other titles can still learn mappings from a completed RPCS3 log.
+
+For MAG `BCUS98110` v02.12, the supplied runtime log confirms the renderer's post-launch `mage_g.self` RSX mappings: IO `0x00000000 -> EA 0x50000000` for `0x02300000` bytes and IO `0x0E000000 -> EA 0x34E00000` for `0x00100000` bytes. Its RSX context maps at `0x60100000`, giving the profile a `CellGcmControl` EA of `0x60100040`. MAG's TTY also reports five renderer command-buffer ranges from IO `0x00001000` through `0x00200000`. Those ranges are documented evidence only for now; SOCOM's `--fifo-follow-calls` logic is intentionally not applied to MAG until the MAG ring/call behavior is captured and validated.
 
 ## Expected limitations
 

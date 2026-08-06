@@ -2,16 +2,16 @@
 
 An experimental, read-only texture dumping tool for games running in RPCS3.
 
-The current version is built and tested around **SOCOM 4: U.S. Navy SEALs — BCUS98135 v01.00**.
+Current built-in profiles are **SOCOM 4: U.S. Navy SEALs — BCUS98135 v01.00** and **MAG — BCUS98110 v02.12**. MAG support is new and its primary FIFO path is the current test target.
 
 ## Features
 
 - Native Windows GUI with no CMD window.
 - Automatically finds the running `rpcs3.exe` process.
 - Read-only access to RPCS3/game memory.
-- Built-in SOCOM 4 RSX memory profile.
+- Built-in SOCOM 4 and MAG RSX memory profiles.
 - Automatic capture tuning in the GUI; no budget/history/sample/delay/max values to guess.
-- Deep texture capture follows the game's confirmed secondary RSX command buffers.
+- SOCOM 4 deep texture capture follows its confirmed secondary RSX command buffers; MAG currently uses its confirmed primary FIFO path while its deeper ring behavior is validated.
 - Dumps BC1/DXT1, BC2/DXT23 and BC3/DXT45 textures to viewable `.bmp` files.
 - Respects RSX row pitch for linear BC textures such as `A6/A7/A8`, using packet-aware `CONTROL3` state tracking to avoid padded-row preview corruption.
 - SOCOM 4 textures are automatically Flip-Y corrected for normal viewing.
@@ -72,23 +72,28 @@ The build statically links the MinGW GCC/C++ runtime and creates the Windows GUI
 build\RPCS3TextureDumper.exe
 ```
 
+The script reports each source-file compile and the final link as separate live
+stages. GCC warnings and errors are streamed directly to the PowerShell window,
+and the completed build reports its total elapsed time.
+
 No Windows CMD window, batch build script, or Visual Studio installation is required.
 
 ## Using the GUI
 
-1. Start RPCS3 and boot SOCOM 4.
+1. Start RPCS3 and boot a supported game.
 2. Load into the scene containing the textures you want to dump.
 3. Launch `RPCS3TextureDumper.exe`.
-4. Leave **Deep texture capture** enabled for the best results.
+4. For SOCOM 4, leave **Deep texture capture** enabled. MAG currently uses its primary FIFO capture path automatically.
 5. Click **Dump Textures**.
 
 Capture limits and FIFO retry timing are selected automatically for the active
 profile. Normal GUI use does not require entering numeric tuning values.
 
-By default, textures are placed in:
+Choose the matching game profile in the GUI. By default, textures are placed in that profile's folder, for example:
 
 ```text
 dumps\BCUS98135\
+dumps\BCUS98110\
 ```
 
 The GUI publishes only `.bmp` files there. Internal FIFO captures, manifests and raw payloads are temporary and are removed automatically after the previews are produced.
@@ -107,7 +112,7 @@ so those implementation details do not need to be adjusted by hand.
 
 ## Current Status
 
-This is an early reverse-engineering tool. SOCOM 4 `BCUS98135` is the currently confirmed game profile and BC/DXT texture formats are the currently verified preview formats.
+This is an early reverse-engineering tool. SOCOM 4 `BCUS98135` is the mature profile; MAG `BCUS98110` v02.12 now has confirmed RSX mappings and primary FIFO capture support. BC/DXT texture formats are the currently verified preview formats.
 
 The dumper does **not** modify RPCS3 or game memory.
 

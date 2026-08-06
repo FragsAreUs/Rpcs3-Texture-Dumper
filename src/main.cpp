@@ -114,6 +114,12 @@ static bool is_socom4_profile(const std::wstring& profile)
            _wcsicmp(profile.c_str(), L"SOCOM 4") == 0;
 }
 
+static bool is_mag_profile(const std::wstring& profile)
+{
+    return _wcsicmp(profile.c_str(), L"BCUS98110") == 0 ||
+           _wcsicmp(profile.c_str(), L"MAG") == 0;
+}
+
 static void apply_automatic_capture_tuning(Options& o)
 {
     if (!o.auto_tune) return;
@@ -423,6 +429,16 @@ static std::optional<std::vector<IoMap>> profile_io_maps(const std::wstring& pro
             {0x00000000u, 0x40000000u, 0x03600000u},
             {0x03600000u, 0x43600000u, 0x00D00000u},
             {0x0E000000u, 0x32500000u, 0x00100000u},
+        };
+    }
+    if (is_mag_profile(profile))
+    {
+        // Confirmed from MAG BCUS98110 v02.12 runtime sys_rsx_context_iomap
+        // calls after mage_g.self creates its own RSX context. Do not use the
+        // earlier launcher mappings from the same RPCS3 log.
+        return std::vector<IoMap>{
+            {0x00000000u, 0x50000000u, 0x02300000u},
+            {0x0E000000u, 0x34E00000u, 0x00100000u},
         };
     }
     return std::nullopt;
@@ -1765,7 +1781,7 @@ static void usage()
         L"RPCS3 Texture Dumper v0.1\n"
         L"Usage: RPCS3TextureDumper.exe [options]\n\n"
         L"  --process NAME       Process name (default rpcs3.exe)\n"
-        L"  --profile NAME       Built-in RSX mapping profile (BCUS98135/SOCOM4)\n"
+        L"  --profile NAME       Built-in RSX mapping profile (BCUS98135/SOCOM4, BCUS98110/MAG)\n"
         L"  --auto-tune          Choose safe capture limits/retry timing automatically\n"
         L"  --log PATH           Current uncompressed RPCS3.log\n"
         L"  --out DIR            Output directory\n"
@@ -1780,7 +1796,7 @@ static void usage()
         L"  --fifo-scan          Find moving CellGcmControl/context state (live FIFO diagnostic)\n"
         L"  --fifo-capture       Snapshot the active primary GET-to-PUT FIFO window\n"
         L"  --fifo-follow-calls  Dump confirmed SOCOM4 secondary buffers called by recent FIFO history\n"
-        L"  --control-ea HEX     CellGcmControl guest EA (SOCOM4 default 0x50100040)\n"
+        L"  --control-ea HEX     CellGcmControl guest EA (profile default when known)\n"
         L"  --fifo-history-mb N  Recent executed bytes to keep before GET (default 2 MB)\n"
         L"  --fifo-sample-ms N   Delay between FIFO samples/capture retries (default 250 ms)\n"
         L"  --fifo-samples N     FIFO samples/capture attempts (default 8)\n"
@@ -1966,7 +1982,7 @@ int cli_main(int argc, wchar_t** argv)
         if (opt.log_path.empty() || !fs::exists(opt.log_path))
         {
             std::wcerr << L"[!] Current RPCS3.log not found. Pass it with --log PATH,\n"
-                       << L"[!] or use --profile BCUS98135 for the confirmed SOCOM 4 mapping.\n";
+                       << L"[!] or use a confirmed built-in profile such as BCUS98135 or BCUS98110.\n";
             return 7;
         }
         maps = parse_io_maps(opt.log_path);
@@ -2001,6 +2017,11 @@ int cli_main(int argc, wchar_t** argv)
             std::transform(p.begin(), p.end(), p.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towupper(c)); });
             if (p == L"BCUS98135" || p == L"SOCOM4" || p == L"SOCOM 4")
                 opt.control_ea = 0x50100040u;
+            else if (p == L"BCUS98110" || p == L"MAG")
+                // mage_g.self's RSX context is mapped at 0x60100000. The
+                // CellGcmControl DMA block uses the same +0x40 layout already
+                // validated by the SOCOM profile.
+                opt.control_ea = 0x60100040u;
             else
             {
                 std::wcerr << L"[!] --fifo-capture needs --control-ea for this profile.\n";
