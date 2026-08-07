@@ -32,9 +32,9 @@ jobs:
           update: true
           install: mingw-w64-ucrt-x86_64-gcc
 
-      # build.ps1 runs from ordinary PowerShell. setup-msys2 may install into
-      # the runner's temporary tools directory, so expose UCRT64\bin to later
-      # PowerShell steps instead of assuming C:\msys64.
+      # build.cmd runs from an ordinary Windows shell. setup-msys2 may install
+      # into the runner's temporary tools directory, so expose UCRT64\bin to
+      # later steps instead of assuming C:\msys64.
       - name: Add UCRT64 GCC to PATH
         shell: pwsh
         run: |
@@ -51,8 +51,8 @@ jobs:
           build-mode: none
 
       - name: Build RPCS3 Texture Dumper
-        shell: pwsh
-        run: .\build.ps1
+        shell: cmd
+        run: build.cmd
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v4

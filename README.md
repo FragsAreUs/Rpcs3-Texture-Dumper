@@ -59,13 +59,15 @@ pacman -S --needed mingw-w64-ucrt-x86_64-gcc
 
 ### 3. Build the dumper
 
-Open a normal **PowerShell** terminal in the project folder and run:
+Open the project folder in a terminal and run:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\build.ps1
+```cmd
+.\build.cmd
 ```
 
-`build.ps1` looks for `g++` on your PATH and also automatically checks the standard MSYS2 location:
+No PowerShell execution-policy change or extra flag is required. `build.cmd`
+looks for `g++` on your PATH and also automatically checks the standard MSYS2
+location:
 
 ```text
 C:\msys64\ucrt64\bin\g++.exe
@@ -77,11 +79,8 @@ The build statically links the MinGW GCC/C++ runtime and creates the Windows GUI
 build\RPCS3TextureDumper.exe
 ```
 
-The script reports each source-file compile and the final link as separate live
-stages. GCC warnings and errors are streamed directly to the PowerShell window,
-and the completed build reports its total elapsed time.
-
-No Windows CMD window, batch build script, or Visual Studio installation is required.
+GCC warnings and errors are streamed directly to the terminal. No Visual Studio,
+CMake installation, or PowerShell script is required.
 
 ## Using the GUI
 

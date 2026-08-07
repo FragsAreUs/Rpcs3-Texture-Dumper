@@ -65,24 +65,18 @@ pacman -S --needed mingw-w64-ucrt-x86_64-gcc
 If the first command asks you to close/reopen MSYS2, do that, reopen the UCRT64
 terminal, then run the install command.
 
-4. In a normal VS Code **PowerShell** terminal, open this project directory and run:
+4. In a normal terminal, open this project directory and run:
 
-```powershell
-.\build.ps1
+```cmd
+.\build.cmd
 ```
 
-If PowerShell says script execution is disabled, you can run this one script
-without changing your permanent policy:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\build.ps1
-```
-
-`build.ps1` automatically uses `g++` from PATH or the normal
+No PowerShell execution-policy change is needed. `build.cmd` automatically uses
+`g++` from PATH or the normal
 `C:\msys64\ucrt64\bin\g++.exe` installation. When the normal MSYS2 install is
-detected, the script also adds its `ucrt64\bin` directory to the build-process
-PATH automatically so GCC's internal compiler, assembler, linker and runtime
-DLLs can be found from an ordinary VS Code PowerShell terminal.
+detected, the script adds its `ucrt64\bin` directory to the build-process PATH
+so GCC's internal compiler, assembler, linker and runtime DLLs can be found
+from an ordinary Windows terminal.
 
 The executable is written to `build\RPCS3TextureDumper.exe`. No CMake install is
 required for this route. MinGW builds statically link the GCC/C++ runtime so the
