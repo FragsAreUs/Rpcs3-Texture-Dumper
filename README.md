@@ -2,14 +2,14 @@
 
 An experimental, read-only texture dumping tool for games running in RPCS3.
 
-Current built-in profiles are **SOCOM 4: U.S. Navy SEALs — BCUS98135 v01.00** and **MAG — BCUS98110 v02.12**. MAG support includes its confirmed primary FIFO mapping plus a five-buffer RendererRing Deep Capture path.
+Current built-in profiles are **SOCOM 4: U.S. Navy SEALs — BCUS98135 v01.00**, **MAG — BCUS98110 v02.12**, and one region-neutral **Wolfenstein v01.02** profile covering both **BLES00564** and **BLUS30298**. MAG support includes its confirmed primary FIFO mapping plus a five-buffer RendererRing Deep Capture path. Wolfenstein support includes its live-confirmed primary FIFO mapping and segmented one-megabyte CommandRing Deep Capture.
 
 ## Features
 
 - Native Windows GUI with no CMD window.
 - Automatically finds the running `rpcs3.exe` process.
 - Read-only access to RPCS3/game memory.
-- Built-in SOCOM 4 and MAG RSX memory profiles.
+- Built-in SOCOM 4, MAG, and Wolfenstein RSX memory profiles.
 - Supported games are registered in the dedicated `src/modules/profiles.*`
   module, so adding a profile does not require hard-coded GUI selection logic.
 - Process access, RSX mapping, texture parsing, capture strategies, diagnostics,
@@ -87,9 +87,9 @@ No Windows CMD window, batch build script, or Visual Studio installation is requ
 1. Start RPCS3 and boot a supported game.
 2. Load into the scene containing the textures you want to dump.
 3. Launch `RPCS3TextureDumper.exe`.
-4. Select the matching **Game profile** (SOCOM 4 or MAG). The window title,
+4. Select the matching **Game profile** (SOCOM 4, MAG, or Wolfenstein). The window title,
    output folder and capture mode update from that profile.
-5. Leave **Deep texture capture** enabled for the best results. On MAG this scans all five confirmed RendererRing command buffers in one capture.
+5. Leave **Deep texture capture** enabled for the best results when the selected profile supports it. On MAG this scans all five confirmed RendererRing command buffers in one capture. On Wolfenstein it scans the confirmed segmented one-megabyte command ring.
 6. Click **Dump Textures**.
 
 MAG Deep Capture inventories the five renderer command buffers reported by the
@@ -107,6 +107,7 @@ Choose the matching game profile in the GUI. By default, textures are placed in 
 ```text
 dumps\SOCOM 4 - BCUS98135\
 dumps\MAG - BCUS98110\
+dumps\Wolfenstein - BLES00564-BLUS30298\
 ```
 
 The GUI publishes only `.bmp` files there. Internal FIFO captures, manifests and raw payloads are temporary and are removed automatically after the previews are produced.
@@ -125,7 +126,7 @@ so those implementation details do not need to be adjusted by hand.
 
 ## Current Status
 
-This is an early reverse-engineering tool. SOCOM 4 `BCUS98135` is the mature profile; MAG `BCUS98110` v02.12 has confirmed RSX mappings, primary FIFO capture and five-buffer RendererRing Deep Capture support. BC/DXT texture formats are the currently verified preview formats.
+This is an early reverse-engineering tool. SOCOM 4 `BCUS98135` is the mature profile; MAG `BCUS98110` v02.12 has confirmed RSX mappings, primary FIFO capture and five-buffer RendererRing Deep Capture support. Wolfenstein `BLES00564`/`BLUS30298` v01.02 has live-confirmed RSX mappings, primary FIFO capture and a segmented CommandRing Deep Capture path. BC/DXT texture formats are the currently verified preview formats.
 
 The dumper does **not** modify RPCS3 or game memory.
 

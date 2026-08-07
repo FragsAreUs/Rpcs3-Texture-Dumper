@@ -59,7 +59,7 @@ void usage()
         L"RPCS3 Texture Dumper v0.1\n"
         L"Usage: RPCS3TextureDumper.exe [options]\n\n"
         L"  --process NAME       Process name (default rpcs3.exe)\n"
-        L"  --profile NAME       Built-in RSX mapping profile (BCUS98135/SOCOM4, BCUS98110/MAG)\n"
+        L"  --profile NAME       Built-in RSX mapping profile (SOCOM4, MAG, WOLFENSTEIN)\n"
         L"  --auto-tune          Choose safe capture limits/retry timing automatically\n"
         L"  --log PATH           Current uncompressed RPCS3.log\n"
         L"  --out DIR            Output directory\n"
@@ -74,7 +74,8 @@ void usage()
         L"  --fifo-scan          Find moving CellGcmControl/context state (live FIFO diagnostic)\n"
         L"  --fifo-capture       Snapshot the active primary GET-to-PUT FIFO window\n"
         L"  --fifo-follow-calls  Dump confirmed SOCOM4 secondary buffers called by recent FIFO history\n"
-        L"  --renderer-ring      Scan RendererRing buffers configured by the selected profile\n"
+        L"  --renderer-ring      Scan command-buffer ranges configured by the selected profile\n"
+        L"  --command-ring       Alias for --renderer-ring\n"
         L"  --mag-renderer-ring  Legacy alias for --renderer-ring\n"
         L"  --control-ea HEX     CellGcmControl guest EA (profile default when known)\n"
         L"  --fifo-history-mb N  Recent executed bytes to keep before GET (default 2 MB)\n"
@@ -110,7 +111,8 @@ bool parse_args(int argc, wchar_t** argv, Options& options)
         if (argument == L"--fifo-scan") { options.fifo_scan = true; continue; }
         if (argument == L"--fifo-capture") { options.fifo_capture = true; continue; }
         if (argument == L"--fifo-follow-calls") { options.fifo_follow_calls = true; continue; }
-        if (argument == L"--renderer-ring" || argument == L"--mag-renderer-ring") { options.renderer_ring = true; continue; }
+        if (argument == L"--renderer-ring" || argument == L"--command-ring" ||
+            argument == L"--mag-renderer-ring") { options.renderer_ring = true; continue; }
         if (argument == L"--tile-scan") { options.tile_scan = true; continue; }
         if (argument == L"--descriptor-scan") { options.rsx_scan = false; continue; }
         if (argument == L"--process") { if (const auto* value = need(L"--process")) options.process = value; else return false; continue; }

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -24,10 +25,12 @@ using Options = app::Options;
 using TextureDesc = rsx_texture::TextureDesc;
 using RsxTexture = rsx_texture::RsxTexture;
 
-static bool is_renderer_ring_profile(const std::wstring& profile)
+static bool is_buffer_range_profile(const std::wstring& profile)
 {
     const auto* selected = profiles::find(profile);
-    return selected && selected->deep_capture == profiles::DeepCaptureKind::renderer_ring;
+    return selected &&
+           (selected->deep_capture == profiles::DeepCaptureKind::renderer_ring ||
+            selected->deep_capture == profiles::DeepCaptureKind::command_ring);
 }
 
 using diagnostics::scan_gcm_fifo_state;
@@ -41,6 +44,7 @@ using rsx_texture::hex2;
 using rsx_texture::hex8;
 using rsx_texture::parse_candidate;
 using rsx_texture::parse_rsx_texture_block;
+using rsx_texture::parse_rsx_texture_state_stream;
 using rsx_texture::read_be32;
 static bool readable_protection(DWORD protection)
 {
@@ -58,17 +62,22 @@ static int capture_renderer_ring(HANDLE process, std::uintptr_t vm_base, const O
                                  const std::vector<IoMap>& maps)
 {
     const auto* profile = profiles::find(opt.profile);
-    if (!profile || profile->deep_capture != profiles::DeepCaptureKind::renderer_ring)
+    if (!profile ||
+        (profile->deep_capture != profiles::DeepCaptureKind::renderer_ring &&
+         profile->deep_capture != profiles::DeepCaptureKind::command_ring))
     {
-        std::wcerr << L"[!] The selected profile does not define a RendererRing Deep Capture.\n";
+        std::wcerr << L"[!] The selected profile does not define a command-buffer Deep Capture.\n";
         return 9;
     }
+    const bool command_ring = profile->deep_capture == profiles::DeepCaptureKind::command_ring;
+    const wchar_t* capture_name = command_ring ? L"CommandRing" : L"RendererRing";
+    const wchar_t* manifest_name = command_ring ? L"command_ring_textures.csv" : L"renderer_ring_textures.csv";
     const auto ring = std::span(profile->deep_buffers.data(), profile->deep_buffer_count);
 
-    std::ofstream csv(opt.out_dir / L"renderer_ring_textures.csv");
+    std::ofstream csv(opt.out_dir / manifest_name);
     if (!csv)
     {
-        std::wcerr << L"[!] Could not create renderer_ring_textures.csv.\n";
+        std::wcerr << L"[!] Could not create " << manifest_name << L".\n";
         return 16;
     }
     csv << "index,buffer,command_ea,io_offset,unit,data_ea,location,offset,format,mipmaps,dimension,cubemap,width,height,pitch,"
@@ -80,8 +89,8 @@ static int capture_renderer_ring(HANDLE process, std::uintptr_t vm_base, const O
     std::uint64_t dumped_bytes = 0;
     std::size_t buffers_read = 0;
 
-    std::wcout << L"[+] " << profile->game_name << L" deep capture: scanning all "
-               << ring.size() << L" configured RendererRing command buffers...\n";
+    std::wcout << L"[+] " << profile->game_name << L" deep capture: scanning "
+               << ring.size() << L" configured " << capture_name << L" range(s)...\n";
     for (std::size_t buffer_index = 0; buffer_index < ring.size() && texture_count < opt.max_textures; ++buffer_index)
     {
         const auto& range = ring[buffer_index];
@@ -89,7 +98,7 @@ static int capture_renderer_ring(HANDLE process, std::uintptr_t vm_base, const O
         const auto end_map = io_map_for_offset(range.end - 1u, maps);
         if (!begin_map || !end_map || *begin_map != *end_map)
         {
-            std::wcerr << L"[!] " << profile->game_name << L" RendererRing buffer " << buffer_index
+            std::wcerr << L"[!] " << profile->game_name << L' ' << capture_name << L" range " << buffer_index
                        << L" does not fit a confirmed RSX IO mapping; skipping it.\n";
             continue;
         }
@@ -100,33 +109,61 @@ static int capture_renderer_ring(HANDLE process, std::uintptr_t vm_base, const O
         std::vector<std::uint8_t> bytes(size);
         if (!read_remote(process, vm_base + begin_ea, bytes.data(), bytes.size()))
         {
-            std::wcerr << L"[!] Could not read " << profile->game_name << L" RendererRing buffer " << buffer_index
+            std::wcerr << L"[!] Could not read " << profile->game_name << L' ' << capture_name << L" range " << buffer_index
                        << L" at EA 0x" << std::hex << begin_ea << std::dec << L"; skipping it.\n";
             continue;
         }
         ++buffers_read;
 
-        std::size_t buffer_textures = 0;
-        for (std::size_t pos = 0; pos + 32 <= bytes.size() && texture_count < opt.max_textures; pos += 4)
+        if (command_ring)
         {
-            auto r = parse_rsx_texture_block(bytes.data() + pos, bytes.size() - pos,
-                                             begin_ea + static_cast<std::uint32_t>(pos),
-                                             range.begin + static_cast<std::uint32_t>(pos), maps);
-            if (!r) continue;
-
-            r->pitch = find_control3_pitch_for_texture(bytes.data(), bytes.size(), pos,
-                                                       r->unit, r->format, r->width);
-            if (r->pitch)
+            const std::string raw_name = "command_ring_" + std::to_string(buffer_index) + ".bin";
+            std::ofstream raw(opt.out_dir / raw_name, std::ios::binary);
+            if (raw)
             {
-                TextureDesc sized{};
-                sized.format = r->format;
-                sized.width = r->width;
-                sized.height = r->height;
-                sized.depth = 1;
-                sized.pitch = r->pitch;
-                r->estimated_size = estimate_size(sized);
+                raw.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+                if (raw)
+                    std::wcout << L"    Raw CommandRing range: " << (opt.out_dir / raw_name) << L"\n";
             }
+        }
 
+        std::vector<RsxTexture> candidates;
+        if (command_ring)
+        {
+            constexpr std::size_t command_segment_size = 0x8000;
+            candidates = parse_rsx_texture_state_stream(
+                bytes.data(), bytes.size(), begin_ea, range.begin, maps, command_segment_size);
+        }
+        else
+        {
+            for (std::size_t pos = 0; pos + 32 <= bytes.size(); pos += 4)
+            {
+                auto r = parse_rsx_texture_block(bytes.data() + pos, bytes.size() - pos,
+                                                 begin_ea + static_cast<std::uint32_t>(pos),
+                                                 range.begin + static_cast<std::uint32_t>(pos), maps);
+                if (!r) continue;
+
+                r->pitch = find_control3_pitch_for_texture(bytes.data(), bytes.size(), pos,
+                                                           r->unit, r->format, r->width);
+                if (r->pitch)
+                {
+                    TextureDesc sized{};
+                    sized.format = r->format;
+                    sized.width = r->width;
+                    sized.height = r->height;
+                    sized.depth = 1;
+                    sized.pitch = r->pitch;
+                    r->estimated_size = estimate_size(sized);
+                }
+                candidates.push_back(*r);
+            }
+        }
+
+        std::size_t buffer_textures = 0;
+        for (const auto& candidate : candidates)
+        {
+            if (texture_count >= opt.max_textures) break;
+            const auto* r = &candidate;
             std::array<std::uint8_t, 16> probe{};
             if (!read_remote(process, vm_base + r->data_ea, probe.data(), probe.size())) continue;
             const auto key = std::make_tuple(r->location, r->offset, r->format, r->width, r->height);
@@ -171,17 +208,17 @@ static int capture_renderer_ring(HANDLE process, std::uintptr_t vm_base, const O
                 << ',' << (dumped ? "yes" : "no") << '\n';
         }
 
-        std::wcout << L"    RendererRing[" << buffer_index << L"] IO 0x" << std::hex << range.begin
+        std::wcout << L"    " << capture_name << L'[' << buffer_index << L"] IO 0x" << std::hex << range.begin
                    << L"..0x" << range.end << std::dec << L": " << buffer_textures
                    << L" unique texture binding(s)\n";
     }
 
-    std::wcout << L"[+] " << profile->game_name << L" RendererRing buffers read: " << buffers_read << L"/" << ring.size() << L"\n";
-    std::wcout << L"[+] " << profile->game_name << L" RendererRing unique texture bindings: " << texture_count << L"\n";
+    std::wcout << L"[+] " << profile->game_name << L' ' << capture_name << L" ranges read: " << buffers_read << L"/" << ring.size() << L"\n";
+    std::wcout << L"[+] " << profile->game_name << L' ' << capture_name << L" unique texture bindings: " << texture_count << L"\n";
     if (!opt.list_only)
-        std::wcout << L"[+] " << profile->game_name << L" RendererRing payloads dumped: " << dumped_count << L" ("
+        std::wcout << L"[+] " << profile->game_name << L' ' << capture_name << L" payloads dumped: " << dumped_count << L" ("
                    << (dumped_bytes / (1024 * 1024)) << L" MB)\n";
-    std::wcout << L"[+] RendererRing manifest: " << (opt.out_dir / L"renderer_ring_textures.csv") << L"\n";
+    std::wcout << L"[+] " << capture_name << L" manifest: " << (opt.out_dir / manifest_name) << L"\n";
     return 0;
 }
 
@@ -209,14 +246,175 @@ static bool recent_primary_has_socom_call(HANDLE process, std::uintptr_t vm_base
     return false;
 }
 
+static void report_primary_control_flow(const std::vector<std::uint8_t>& history,
+                                        std::uint32_t history_io,
+                                        const std::vector<IoMap>& maps,
+                                        const std::filesystem::path& out_dir)
+{
+    struct ControlTarget
+    {
+        std::size_t count = 0;
+        std::uint32_t last_site_io = 0;
+    };
+
+    std::map<std::uint32_t, ControlTarget> calls;
+    std::map<std::uint32_t, ControlTarget> jumps;
+    std::vector<std::uint32_t> return_sites;
+    std::size_t method_packets = 0;
+
+    for (std::size_t position = 0; position + 4 <= history.size();)
+    {
+        const std::uint32_t command = read_be32(history.data() + position);
+        const std::uint32_t site_io = history_io + static_cast<std::uint32_t>(position);
+
+        if (command == 0x00020000u)
+        {
+            return_sites.push_back(site_io);
+            position += 4;
+            continue;
+        }
+        if ((command & 0xE0000003u) == 0x20000000u)
+        {
+            const std::uint32_t target_io = command & 0x1FFFFFFCu;
+            auto& target = jumps[target_io];
+            ++target.count;
+            target.last_site_io = site_io;
+            position += 4;
+            continue;
+        }
+        if ((command & 3u) != 0)
+        {
+            if ((command & 3u) == 2u)
+            {
+                const std::uint32_t target_io = command & ~3u;
+                auto& target = calls[target_io];
+                ++target.count;
+                target.last_site_io = site_io;
+            }
+            position += 4;
+            continue;
+        }
+
+        const std::uint32_t count = (command >> 18) & 0x7ffu;
+        const std::uint64_t step = 4ull * (static_cast<std::uint64_t>(count) + 1ull);
+        if (step > history.size() - position) break;
+        ++method_packets;
+        position += static_cast<std::size_t>(step);
+    }
+
+    std::ofstream csv(out_dir / L"fifo_control_flow.csv");
+    if (csv)
+    {
+        csv << "type,site_io,target_io,target_ea,count,mapped\n";
+        for (const auto& [target_io, target] : calls)
+        {
+            const auto map_index = io_map_for_offset(target_io, maps);
+            std::uint32_t target_ea = 0;
+            if (map_index)
+            {
+                const auto& map = maps[*map_index];
+                target_ea = map.ea + (target_io - map.io);
+            }
+            csv << "call,0x" << hex8(target.last_site_io)
+                << ",0x" << hex8(target_io)
+                << ",0x" << hex8(target_ea)
+                << ',' << target.count
+                << ',' << (map_index ? "yes" : "no") << '\n';
+        }
+        for (const auto& [target_io, target] : jumps)
+        {
+            const auto map_index = io_map_for_offset(target_io, maps);
+            std::uint32_t target_ea = 0;
+            if (map_index)
+            {
+                const auto& map = maps[*map_index];
+                target_ea = map.ea + (target_io - map.io);
+            }
+            csv << "jump,0x" << hex8(target.last_site_io)
+                << ",0x" << hex8(target_io)
+                << ",0x" << hex8(target_ea)
+                << ',' << target.count
+                << ',' << (map_index ? "yes" : "no") << '\n';
+        }
+        for (const std::uint32_t site_io : return_sites)
+            csv << "return,0x" << hex8(site_io) << ",0x00000000,0x00000000,1,n/a\n";
+    }
+
+    std::size_t total_calls = 0;
+    for (const auto& [target_io, target] : calls)
+    {
+        (void)target_io;
+        total_calls += target.count;
+    }
+    std::size_t total_jumps = 0;
+    for (const auto& [target_io, target] : jumps)
+    {
+        (void)target_io;
+        total_jumps += target.count;
+    }
+    std::wcout << L"[+] Primary FIFO control flow: " << method_packets << L" method packet(s), "
+               << total_calls << L" CALL(s) to " << calls.size() << L" distinct target(s), "
+               << total_jumps << L" JUMP(s) to " << jumps.size() << L" distinct target(s), "
+               << return_sites.size() << L" RETURN(s)\n";
+
+    constexpr std::size_t max_reported_targets = 64;
+    std::size_t reported = 0;
+    for (const auto& [target_io, target] : calls)
+    {
+        if (reported++ >= max_reported_targets) break;
+        const auto map_index = io_map_for_offset(target_io, maps);
+        std::wcout << L"    CALL IO 0x" << std::hex << target.last_site_io
+                   << L" -> 0x" << target_io;
+        if (map_index)
+        {
+            const auto& map = maps[*map_index];
+            const std::uint32_t target_ea = map.ea + (target_io - map.io);
+            std::wcout << L" (EA 0x" << target_ea << L")";
+        }
+        else
+        {
+            std::wcout << L" (outside confirmed IO maps)";
+        }
+        std::wcout << std::dec << L", " << target.count << L" hit(s)\n";
+    }
+    for (const auto& [target_io, target] : jumps)
+    {
+        if (reported++ >= max_reported_targets) break;
+        const auto map_index = io_map_for_offset(target_io, maps);
+        std::wcout << L"    JUMP IO 0x" << std::hex << target.last_site_io
+                   << L" -> 0x" << target_io;
+        if (map_index)
+        {
+            const auto& map = maps[*map_index];
+            const std::uint32_t target_ea = map.ea + (target_io - map.io);
+            std::wcout << L" (EA 0x" << target_ea << L")";
+        }
+        else
+        {
+            std::wcout << L" (outside confirmed IO maps)";
+        }
+        std::wcout << std::dec << L", " << target.count << L" hit(s)\n";
+    }
+    for (const std::uint32_t site_io : return_sites)
+    {
+        if (reported++ >= max_reported_targets) break;
+        std::wcout << L"    RETURN at IO 0x" << std::hex << site_io << std::dec << L"\n";
+    }
+    const std::size_t total_distinct = calls.size() + jumps.size() + return_sites.size();
+    if (total_distinct > max_reported_targets)
+        std::wcout << L"    ... " << (total_distinct - max_reported_targets)
+                   << L" additional control-flow record(s) retained in fifo_control_flow.csv\n";
+    std::wcout << L"[+] Control-flow manifest: " << (out_dir / L"fifo_control_flow.csv") << L"\n";
+}
+
 static int capture_active_fifo(HANDLE process, std::uintptr_t vm_base, const Options& opt,
                                const std::vector<IoMap>& maps)
 {
-    // MAG's Deep Capture is intentionally independent of the instantaneous
-    // primary FIFO GET/PUT window. Scan the complete RendererRing first so a
+    // Configured command-buffer Deep Captures are intentionally independent of
+    // the instantaneous primary FIFO GET/PUT window. Scan them first so a
     // wrapped primary FIFO cannot prevent the useful texture inventory pass.
-    const bool renderer_ring_deep = opt.renderer_ring && is_renderer_ring_profile(opt.profile);
-    if (renderer_ring_deep)
+    const bool buffer_range_deep = opt.renderer_ring && is_buffer_range_profile(opt.profile);
+    if (buffer_range_deep)
     {
         const int ring_result = capture_renderer_ring(process, vm_base, opt, maps);
         if (ring_result != 0) return ring_result;
@@ -285,9 +483,9 @@ static int capture_active_fifo(HANDLE process, std::uintptr_t vm_base, const Opt
                        << L", PUT=0x" << put << std::dec << L").\n"
                        << L"[!] Ring-boundary reconstruction is intentionally not guessed; no safe linear window was captured after "
                        << opt.fifo_samples << L" attempts (" << wrapped_samples << L" wrapped sample(s)).\n";
-            if (renderer_ring_deep)
+            if (buffer_range_deep)
             {
-                std::wcout << L"[*] MAG RendererRing Deep Capture completed successfully; skipping only the wrapped primary FIFO snapshot.\n";
+                std::wcout << L"[*] Configured command-buffer Deep Capture completed successfully; skipping only the wrapped primary FIFO snapshot.\n";
                 return 0;
             }
             return 12;
@@ -404,6 +602,13 @@ static int capture_active_fifo(HANDLE process, std::uintptr_t vm_base, const Opt
             return 16;
         }
         std::wcout << L"[+] Recent primary FIFO history: " << (opt.out_dir / L"fifo_history.bin") << L"\n";
+    }
+
+    if (!history.empty())
+    {
+        const auto* profile = profiles::find(opt.profile);
+        if (profile && profile->deep_capture == profiles::DeepCaptureKind::none)
+            report_primary_control_flow(history, history_io, maps, opt.out_dir);
     }
 
     if (opt.fifo_follow_calls && !history.empty())

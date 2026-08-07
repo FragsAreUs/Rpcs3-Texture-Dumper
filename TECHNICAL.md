@@ -100,12 +100,12 @@ build\RPCS3TextureDumper.exe
 
 The GUI is intentionally focused on texture dumping only. It exposes:
 
-- selectable SOCOM 4 / `BCUS98135` v01.00 and MAG / `BCUS98110` v02.12 profiles
+- selectable SOCOM 4 / `BCUS98135` v01.00, MAG / `BCUS98110` v02.12, and one region-neutral Wolfenstein v01.02 profile accepting `BLES00564` or `BLUS30298`
 - centralized `src/modules/profiles.*` registry for per-game identity, RSX maps,
   CellGcmControl address and Deep Capture command-buffer configuration
 - output-root folder picker
 - **Dump Textures**, **Stop**, and **Open Output Folder** buttons
-- profile-aware deep texture capture: SOCOM 4 follows its confirmed secondary command buffers, while MAG scans its five confirmed RendererRing allocations automatically
+- profile-aware deep texture capture: SOCOM 4 follows its confirmed secondary command buffers, MAG scans its five confirmed RendererRing allocations, and Wolfenstein scans its segmented one-megabyte command ring
 - automatic GUI capture tuning; budget, recent-history size, sample/delay, and maximum-texture controls remain CLI diagnostics
 - optional orientation diagnostic previews; normal BMP output uses the user-confirmed Flip-Y orientation
 - a live capture log
@@ -228,7 +228,7 @@ no zlib dependency.
 
 ```text
 --process rpcs3.exe       Process name (default: rpcs3.exe)
---profile NAME            Built-in RSX mapping profile (BCUS98135/SOCOM4, BCUS98110/MAG)
+--profile NAME            Built-in RSX mapping profile (SOCOM4, MAG, WOLFENSTEIN)
 --log PATH                RPCS3.log path
 --out DIR                 Output directory (default: rpcs3_texture_dump)
 --guest-start HEX         Descriptor scan start EA (default: 0x00010000)
@@ -258,6 +258,8 @@ no zlib dependency.
 For SOCOM 4, the built-in profile contains the mappings confirmed across the supplied logs, including IO `0x00000000 -> EA 0x40000000` and IO `0x03600000 -> EA 0x43600000`. Other titles can still learn mappings from a completed RPCS3 log.
 
 For MAG `BCUS98110` v02.12, the supplied runtime log confirms the renderer's post-launch `mage_g.self` RSX mappings: IO `0x00000000 -> EA 0x50000000` for `0x02300000` bytes and IO `0x0E000000 -> EA 0x34E00000` for `0x00100000` bytes. Its RSX context maps at `0x60100000`, giving the profile a `CellGcmControl` EA of `0x60100040`. MAG's TTY reports five RendererRing command-buffer ranges: `0x001000..0x0A4000`, `0x0A4000..0x0D3000`, `0x0D3000..0x11B000`, `0x11B000..0x197000` and `0x197000..0x200000`. `--renderer-ring` scans the allocations stored by the selected profile directly on each Deep Capture. The supplied 218-BMP sample contained bindings from only buffers 0 and 3, demonstrating why active-FIFO-only capture was sensitive to camera movement. Ring scanning intentionally accepts cached command-buffer contents when they still reference readable textures; GUI publication removes byte-identical BMP duplicates.
+
+For Wolfenstein `BLES00564`/`BLUS30298` v01.02, the supplied runtime logs identify PPU hash `eb633143c2ad46e28e8b2d2374b0a331168c2c66` and confirm IO `0x00000000 -> EA 0x70000000` for `0x00100000` bytes plus IO `0x00100000 -> EA 0x70100000` for `0x01D00000` bytes. The supplied BLUS `EBOOT.elf` and `wolfsp.elf` are byte-identical, and both regional runtime logs report the same PPU hash and RSX layout. The RSX context maps at `0x80100000`, and live testing confirms the standard `CellGcmControl` EA of `0x80100040`. The first live captures produced valid moving primary FIFO windows and recent history but no inline texture bindings. Control-flow diagnostics then confirmed JUMPs chaining consecutive `0x8000`-byte segments throughout IO `0x00000000..0x00100000`, identifying a segmented one-megabyte command ring. Wolfenstein's CommandRing Deep Capture scans that confirmed range directly; GUI deduplication removes repeated BMP payloads from cached command data.
 
 ## Expected limitations
 

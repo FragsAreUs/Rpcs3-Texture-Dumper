@@ -16,7 +16,7 @@ bool iequals(std::wstring_view a, std::wstring_view b)
     return true;
 }
 
-constexpr std::array<GameProfile, 2> kProfiles = {{
+constexpr std::array<GameProfile, 3> kProfiles = {{
     {
         L"BCUS98135",
         L"SOCOM 4",
@@ -56,6 +56,26 @@ constexpr std::array<GameProfile, 2> kProfiles = {{
           {0x00197000u, 0x00200000u},
           {0u, 0u}}},
         5,
+    },
+    {
+        L"BLES00564-BLUS30298",
+        L"Wolfenstein",
+        L"v01.02",
+        L"Wolfenstein v01.02",
+        {L"BLES00564", L"BLUS30298", L"WOLFENSTEIN"},
+        0x80100040u,
+        {{{0x00000000u, 0x70000000u, 0x00100000u},
+          {0x00100000u, 0x70100000u, 0x01D00000u},
+          {0u, 0u, 0u}}},
+        2,
+        DeepCaptureKind::command_ring,
+        {{{0x00000000u, 0x00100000u},
+          {0u, 0u},
+          {0u, 0u},
+          {0u, 0u},
+          {0u, 0u},
+          {0u, 0u}}},
+        1,
     },
 }};
 }

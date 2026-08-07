@@ -108,7 +108,7 @@ int cli_main(int argc, wchar_t** argv)
         if (options.log_path.empty() || !fs::exists(options.log_path))
         {
             std::wcerr << L"[!] Current RPCS3.log not found. Pass it with --log PATH,\n"
-                       << L"[!] or use a confirmed built-in profile such as BCUS98135 or BCUS98110.\n";
+                       << L"[!] or use a confirmed built-in profile such as BCUS98135, BCUS98110, or BLES00564.\n";
             return 7;
         }
         maps = rsx::parse_io_maps(options.log_path);

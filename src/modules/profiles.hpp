@@ -27,6 +27,7 @@ enum class DeepCaptureKind
     none,
     socom_secondary_calls,
     renderer_ring,
+    command_ring,
 };
 
 struct GameProfile

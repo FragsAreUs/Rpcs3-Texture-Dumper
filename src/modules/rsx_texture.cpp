@@ -4,9 +4,12 @@
 #include "process_memory.hpp"
 
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <sstream>
+#include <tuple>
 
 namespace fs = std::filesystem;
 
@@ -135,7 +138,7 @@ std::uint32_t find_control3_pitch_for_texture(const std::uint8_t* data, std::siz
                 continue;
             }
 
-            const std::uint32_t method = cmd & 0xfffcu;
+            const std::uint32_t method = cmd & 0x1ffcu;
             const std::uint32_t count = (cmd >> 18) & 0x7ffu;
             if (!count)
             {
@@ -182,7 +185,7 @@ std::uint32_t find_control3_pitch_for_texture(const std::uint8_t* data, std::siz
             continue;
         }
 
-        const std::uint32_t method = cmd & 0xfffcu;
+        const std::uint32_t method = cmd & 0x1ffcu;
         const std::uint32_t count = (cmd >> 18) & 0x7ffu;
         if (!count)
         {
@@ -297,7 +300,7 @@ std::optional<RsxTexture> parse_rsx_texture_block(const std::uint8_t* p, std::si
     if (available < 8 * sizeof(std::uint32_t)) return std::nullopt;
 
     const std::uint32_t cmd = read_be32(p);
-    const std::uint32_t method = cmd & 0xfffcu;
+    const std::uint32_t method = cmd & 0x1ffcu;
     const std::uint32_t count = (cmd >> 18) & 0x7ffu;
     constexpr std::uint32_t non_increment = 0x40000000u;
     if (cmd & non_increment) return std::nullopt;
@@ -354,6 +357,220 @@ std::optional<RsxTexture> parse_rsx_texture_block(const std::uint8_t* p, std::si
     r.estimated_size = estimate_size(t);
     if (r.estimated_size == 0 || r.estimated_size > 128ull * 1024 * 1024) return std::nullopt;
     return r;
+}
+
+std::vector<RsxTexture> parse_rsx_texture_state_stream(
+    const std::uint8_t* data,
+    std::size_t size,
+    std::uint32_t command_ea,
+    std::uint32_t io_offset,
+    const std::vector<IoMap>& maps,
+    std::size_t segment_size)
+{
+    struct TextureRegisterState
+    {
+        std::uint32_t offset = 0;
+        std::uint32_t format_reg = 0;
+        std::uint32_t address = 0;
+        std::uint32_t control0 = 0;
+        std::uint32_t control1 = 0;
+        std::uint32_t filter = 0;
+        std::uint32_t image_rect = 0;
+        std::uint32_t border_color = 0;
+        std::uint32_t control3 = 0;
+        bool have_offset = false;
+        bool have_format = false;
+        bool have_image_rect = false;
+        bool have_control3 = false;
+    };
+
+    std::vector<RsxTexture> results;
+    if (!data || !size || !segment_size) return results;
+
+    std::array<TextureRegisterState, 16> states{};
+    using TextureKey = std::tuple<std::uint8_t, std::uint32_t, std::uint8_t, std::uint16_t, std::uint16_t>;
+    std::map<TextureKey, std::size_t> result_by_key;
+    constexpr std::uint32_t non_increment = 0x40000000u;
+
+    const auto make_texture = [&](std::uint8_t unit, std::size_t packet_at, std::uint32_t header)
+        -> std::optional<RsxTexture>
+    {
+        const auto& state = states[unit];
+        if (!state.have_offset || !state.have_format || !state.have_image_rect)
+            return std::nullopt;
+
+        RsxTexture r{};
+        r.command_ea = command_ea + static_cast<std::uint32_t>(packet_at);
+        r.io_offset = io_offset + static_cast<std::uint32_t>(packet_at);
+        r.header = header;
+        r.unit = unit;
+        r.offset = state.offset;
+        r.format_reg = state.format_reg;
+        r.address = state.address;
+        r.control0 = state.control0;
+        r.control1 = state.control1;
+        r.filter = state.filter;
+        r.image_rect = state.image_rect;
+        r.border_color = state.border_color;
+        r.location = static_cast<std::uint8_t>((r.format_reg >> 1) & 1u);
+        r.cubemap = static_cast<std::uint8_t>((r.format_reg >> 2) & 1u);
+        r.dimension = static_cast<std::uint8_t>((r.format_reg >> 4) & 0x0fu);
+        r.format = static_cast<std::uint8_t>((r.format_reg >> 8) & 0xffu);
+        r.mipmap = static_cast<std::uint16_t>((r.format_reg >> 16) & 0xffffu);
+        r.width = static_cast<std::uint16_t>(r.image_rect >> 16);
+        r.height = static_cast<std::uint16_t>(r.image_rect & 0xffffu);
+
+        if (!known_base_format(r.format)) return std::nullopt;
+        if (r.dimension < 1 || r.dimension > 3) return std::nullopt;
+        if (r.mipmap == 0 || r.mipmap > 16) return std::nullopt;
+        if (!r.width || !r.height || r.width > 8192 || r.height > 8192) return std::nullopt;
+
+        const auto data_ea = resolve_texture_ea(r.location, r.offset, maps);
+        if (!data_ea) return std::nullopt;
+        r.data_ea = *data_ea;
+
+        if ((r.format & 0x20u) && state.have_control3)
+        {
+            const std::uint32_t pitch = state.control3 & 0xfffffu;
+            const std::uint32_t minimum = packed_pitch_for(r.format, r.width);
+            if (pitch && pitch <= 0x100000u && (!minimum || pitch >= minimum))
+                r.pitch = pitch;
+        }
+
+        TextureDesc sized{};
+        sized.format = r.format;
+        sized.mipmap = static_cast<std::uint8_t>(r.mipmap);
+        sized.dimension = r.dimension;
+        sized.cubemap = r.cubemap;
+        sized.location = r.location;
+        sized.width = r.width;
+        sized.height = r.height;
+        sized.depth = 1;
+        sized.pitch = r.pitch;
+        sized.offset = r.offset;
+        sized.data_ea = r.data_ea;
+        r.estimated_size = estimate_size(sized);
+        if (!r.estimated_size || r.estimated_size > 128ull * 1024 * 1024)
+            return std::nullopt;
+        return r;
+    };
+
+    for (std::size_t segment_begin = 0; segment_begin < size; segment_begin += segment_size)
+    {
+        const std::size_t segment_end = std::min(size, segment_begin + segment_size);
+        for (std::size_t at = segment_begin; at + 4 <= segment_end;)
+        {
+            const std::uint32_t cmd = read_be32(data + at);
+            if (cmd == 0x00020000u ||
+                (cmd & 0xE0000003u) == 0x20000000u ||
+                (cmd & 3u) != 0)
+            {
+                at += 4;
+                continue;
+            }
+
+            const std::uint32_t count = (cmd >> 18) & 0x7ffu;
+            if (!count)
+            {
+                at += 4;
+                continue;
+            }
+
+            const std::uint64_t step64 = 4ull * (static_cast<std::uint64_t>(count) + 1ull);
+            if (step64 > segment_end - at)
+                break;
+
+            const std::uint32_t method = cmd & 0x1ffcu;
+            const std::uint32_t subchannel = (cmd >> 13) & 7u;
+            const bool is_non_increment = (cmd & non_increment) != 0;
+            std::array<bool, 16> binding_completed{};
+            std::array<bool, 16> pitch_changed{};
+
+            // Wolfenstein submits the 3D object on subchannel zero. Restricting
+            // state tracking to it prevents payload words for other engines
+            // from being interpreted as fragment-texture methods.
+            if (subchannel == 0)
+            {
+                for (std::uint32_t arg = 0; arg < count; ++arg)
+                {
+                    const std::uint32_t effective_method = is_non_increment
+                        ? method
+                        : method + arg * 4u;
+                    const std::uint32_t value =
+                        read_be32(data + at + static_cast<std::size_t>(arg + 1u) * 4u);
+
+                    if (effective_method >= 0x1840u && effective_method < 0x1880u)
+                    {
+                        const std::uint32_t unit = (effective_method - 0x1840u) / 4u;
+                        states[unit].control3 = value;
+                        states[unit].have_control3 = true;
+                        pitch_changed[unit] = true;
+                        continue;
+                    }
+
+                    if (effective_method < 0x1a00u || effective_method >= 0x1c00u)
+                        continue;
+
+                    const std::uint32_t relative = effective_method - 0x1a00u;
+                    const std::uint32_t unit = relative / 0x20u;
+                    if (unit >= states.size()) continue;
+                    auto& state = states[unit];
+                    switch (relative & 0x1fu)
+                    {
+                    case 0x00:
+                        state.offset = value;
+                        state.have_offset = true;
+                        break;
+                    case 0x04:
+                        state.format_reg = value;
+                        state.have_format = true;
+                        break;
+                    case 0x08: state.address = value; break;
+                    case 0x0c: state.control0 = value; break;
+                    case 0x10: state.control1 = value; break;
+                    case 0x14: state.filter = value; break;
+                    case 0x18:
+                        state.image_rect = value;
+                        state.have_image_rect = true;
+                        binding_completed[unit] = true;
+                        break;
+                    case 0x1c: state.border_color = value; break;
+                    default: break;
+                    }
+                }
+            }
+
+            for (std::size_t unit = 0; unit < binding_completed.size(); ++unit)
+            {
+                if (!binding_completed[unit] && !pitch_changed[unit]) continue;
+                auto texture = make_texture(static_cast<std::uint8_t>(unit), at, cmd);
+                if (!texture) continue;
+
+                const TextureKey key{texture->location, texture->offset, texture->format,
+                                     texture->width, texture->height};
+                const auto found = result_by_key.find(key);
+                if (found == result_by_key.end())
+                {
+                    // OFFSET/FORMAT are written before IMAGE_RECT in
+                    // Wolfenstein. Do not publish their transitional state,
+                    // which still carries the preceding binding's dimensions.
+                    if (!binding_completed[unit]) continue;
+                    result_by_key.emplace(key, results.size());
+                    results.push_back(*texture);
+                }
+                else if (texture->pitch && !results[found->second].pitch)
+                {
+                    // CONTROL3 is often submitted after the rest of a binding.
+                    // Preserve the later candidate when it supplies the pitch.
+                    results[found->second] = *texture;
+                }
+            }
+
+            at += static_cast<std::size_t>(step64);
+        }
+    }
+
+    return results;
 }
 
 bool dump_rsx_payload(HANDLE process, std::uintptr_t vm_base, const RsxTexture& r,

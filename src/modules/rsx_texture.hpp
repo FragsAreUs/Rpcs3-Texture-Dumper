@@ -87,6 +87,13 @@ std::optional<RsxTexture> parse_rsx_texture_block(
     std::uint32_t command_ea,
     std::uint32_t io_offset,
     const std::vector<rsx::IoMap>& maps);
+std::vector<RsxTexture> parse_rsx_texture_state_stream(
+    const std::uint8_t* data,
+    std::size_t size,
+    std::uint32_t command_ea,
+    std::uint32_t io_offset,
+    const std::vector<rsx::IoMap>& maps,
+    std::size_t segment_size);
 bool dump_rsx_payload(
     HANDLE process,
     std::uintptr_t vm_base,

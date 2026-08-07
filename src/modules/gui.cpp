@@ -414,7 +414,8 @@ bool launch_dump()
     if (profile.deep_capture == profiles::DeepCaptureKind::socom_secondary_calls &&
         SendMessageW(GetDlgItem(g.window, ID_DEEP), BM_GETCHECK, 0, 0) == BST_CHECKED)
         cmd << L" --fifo-follow-calls";
-    if (profile.deep_capture == profiles::DeepCaptureKind::renderer_ring &&
+    if ((profile.deep_capture == profiles::DeepCaptureKind::renderer_ring ||
+         profile.deep_capture == profiles::DeepCaptureKind::command_ring) &&
         SendMessageW(GetDlgItem(g.window, ID_DEEP), BM_GETCHECK, 0, 0) == BST_CHECKED)
         cmd << L" --renderer-ring";
     if (SendMessageW(GetDlgItem(g.window, ID_VARIANTS), BM_GETCHECK, 0, 0) == BST_CHECKED)
@@ -446,6 +447,9 @@ bool launch_dump()
     if (profile.deep_capture == profiles::DeepCaptureKind::renderer_ring &&
         SendMessageW(GetDlgItem(g.window, ID_DEEP), BM_GETCHECK, 0, 0) == BST_CHECKED)
         append_log(L"[*] Deep Capture scans every configured RendererRing command buffer for this profile.\r\n");
+    if (profile.deep_capture == profiles::DeepCaptureKind::command_ring &&
+        SendMessageW(GetDlgItem(g.window, ID_DEEP), BM_GETCHECK, 0, 0) == BST_CHECKED)
+        append_log(L"[*] Deep Capture scans the confirmed segmented command ring for this profile.\r\n");
     append_log(L"\r\n");
     set_running(true);
     std::thread(reader_thread, g.pipe_read, g.child.hProcess, g.window).detach();
