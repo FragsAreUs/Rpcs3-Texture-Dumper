@@ -267,7 +267,7 @@ std::string hex2(std::uint8_t v)
 }
 
 bool dump_payload(HANDLE process, std::uintptr_t vm_base, const TextureDesc& t, const fs::path& out_dir,
-                         std::size_t index, bool preview_variants)
+                         std::size_t index, bool preview_variants, bool preview_flip_y)
 {
     std::vector<std::uint8_t> data(static_cast<std::size_t>(t.estimated_size));
     if (!process_memory::read(process, vm_base + t.data_ea, data.data(), data.size())) return false;
@@ -284,7 +284,8 @@ bool dump_payload(HANDLE process, std::uintptr_t vm_base, const TextureDesc& t, 
     out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     if (!out) return false;
 
-    preview::write_bc_previews(data, t.format, t.width, t.height, t.pitch, raw_path, preview_variants);
+    preview::write_bc_previews(data, t.format, t.width, t.height, t.pitch, raw_path,
+                               preview_variants, preview_flip_y);
     return true;
 }
 
@@ -574,7 +575,8 @@ std::vector<RsxTexture> parse_rsx_texture_state_stream(
 }
 
 bool dump_rsx_payload(HANDLE process, std::uintptr_t vm_base, const RsxTexture& r,
-                             const fs::path& out_dir, std::size_t index, bool preview_variants)
+                             const fs::path& out_dir, std::size_t index,
+                             bool preview_variants, bool preview_flip_y)
 {
     TextureDesc t{};
     t.descriptor_ea = r.command_ea;
@@ -590,6 +592,6 @@ bool dump_rsx_payload(HANDLE process, std::uintptr_t vm_base, const RsxTexture& 
     t.offset = r.offset;
     t.data_ea = r.data_ea;
     t.estimated_size = r.estimated_size;
-    return dump_payload(process, vm_base, t, out_dir, index, preview_variants);
+    return dump_payload(process, vm_base, t, out_dir, index, preview_variants, preview_flip_y);
 }
 }

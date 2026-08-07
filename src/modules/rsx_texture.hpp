@@ -80,7 +80,8 @@ bool dump_payload(
     const TextureDesc& texture,
     const std::filesystem::path& output_directory,
     std::size_t index,
-    bool preview_variants);
+    bool preview_variants,
+    bool preview_flip_y);
 std::optional<RsxTexture> parse_rsx_texture_block(
     const std::uint8_t* data,
     std::size_t available,
@@ -100,5 +101,6 @@ bool dump_rsx_payload(
     const RsxTexture& texture,
     const std::filesystem::path& output_directory,
     std::size_t index,
-    bool preview_variants);
+    bool preview_variants,
+    bool preview_flip_y);
 }

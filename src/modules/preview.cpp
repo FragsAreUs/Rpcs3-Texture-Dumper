@@ -147,18 +147,21 @@ bool write_bc_previews(const std::vector<std::uint8_t>& data,
                        std::uint16_t height,
                        std::uint32_t pitch,
                        const fs::path& raw_path,
-                       bool variants)
+                       bool variants,
+                       bool default_flip_y)
 {
-    // User-validated SOCOM 4 default: logical Y flip.
     fs::path normal = raw_path;
     normal.replace_extension(L".bmp");
-    const bool wrote = write_bmp(data, format, width, height, pitch, normal, false, true);
+    const bool wrote = write_bmp(data, format, width, height, pitch, normal, false, default_flip_y);
     if (!wrote) return false;
     if (!variants) return true;
 
     const auto stem = raw_path.stem().wstring();
     const auto parent = raw_path.parent_path();
-    write_bmp(data, format, width, height, pitch, parent / (stem + L"_neutral.bmp"), false, false);
+    if (default_flip_y)
+        write_bmp(data, format, width, height, pitch, parent / (stem + L"_neutral.bmp"), false, false);
+    else
+        write_bmp(data, format, width, height, pitch, parent / (stem + L"_flipy.bmp"), false, true);
     write_bmp(data, format, width, height, pitch, parent / (stem + L"_flipx.bmp"), true, false);
     write_bmp(data, format, width, height, pitch, parent / (stem + L"_flipxy.bmp"), true, true);
     return true;

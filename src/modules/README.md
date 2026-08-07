@@ -30,9 +30,10 @@ strategies, diagnostics, and format support can evolve independently.
   RendererRing, and legacy descriptor capture strategies. It consumes the
   shared process, mapping, texture, and profile interfaces.
 - `preview.*` - verified BC1/BC2/BC3 color-preview decoder and BMP writer.
-  Flip-Y is the normal SOCOM 4 preview orientation. Linear BC formats use the
-  captured RSX CONTROL3 pitch so padded block rows decode correctly. Optional
-  orientation variants are diagnostic output only.
+  Flip-Y remains the normal SOCOM 4/MAG preview orientation, while Wolfenstein
+  uses neutral output. Linear BC formats use the captured RSX CONTROL3 pitch
+  so padded block rows decode correctly. Optional orientation variants are
+  diagnostic output only.
 - `../entry.cpp` - minimal Windows GUI-subsystem entry point. No console is
   created for a normal GUI launch; argument-bearing launches route to
   `cli_main()` in the same executable.

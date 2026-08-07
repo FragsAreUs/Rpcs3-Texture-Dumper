@@ -21,7 +21,7 @@ The first target is SOCOM 4 (`BCUS98135`), but the scanner is not tied to that t
 - Resolves both `CELL_GCM_LOCATION_LOCAL` and mapped `CELL_GCM_LOCATION_MAIN` texture sources.
 - Deduplicates matching descriptors.
 - Dumps the raw texture payload and a CSV manifest containing the descriptor address, resolved guest address, format, dimensions, pitch, remap, mip count and estimated byte size.
-- Emits viewable 24-bit `.bmp` previews beside dumped BC1/DXT1 (`0x86`) and BC2/BC3/DXT23/45 (`0x87`/`0x88`) payloads. Live SOCOM 4 testing established Flip-Y as the useful normal viewing orientation, so that is now the default `.bmp`. Optional orientation diagnostics can also emit neutral, Flip-X and Flip-XY copies. Direct CLI dumps keep the original `.bin` untouched; the GUI uses raw files only as temporary decoding input and removes them after publishing BMPs.
+- Emits viewable 24-bit `.bmp` previews beside dumped BC1/DXT1 (`0x86`) and BC2/BC3/DXT23/45 (`0x87`/`0x88`) payloads. Live SOCOM 4 testing established Flip-Y as its useful viewing orientation, while Wolfenstein uses neutral orientation. Optional orientation diagnostics emit the other three transforms for the selected profile. Direct CLI dumps keep the original `.bin` untouched; the GUI uses raw files only as temporary decoding input and removes them after publishing BMPs.
 - Double-clicking `RPCS3TextureDumper.exe` opens a native texture-dumping GUI with no console/CMD window. The executable is linked as a Windows GUI application; command-line arguments still enter the existing CLI engine, which the GUI uses as its invisible worker.
 - The GUI defaults directly to the active profile folder, `dumps\SOCOM 4 - BCUS98135` beside the EXE. BMPs accumulate in that profile folder instead of creating a separate timestamped folder for every capture, making the final static EXE safe to move into its own standalone folder.
 - GUI profile folders contain **BMP files only**. FIFO captures, CSV manifests and raw `.bin` payloads are kept in a private temporary worker directory while decoding and are removed after the BMPs are published. The advanced CLI still retains those diagnostic files when invoked directly.
@@ -107,7 +107,7 @@ The GUI is intentionally focused on texture dumping only. It exposes:
 - **Dump Textures**, **Stop**, and **Open Output Folder** buttons
 - profile-aware deep texture capture: SOCOM 4 follows its confirmed secondary command buffers, MAG scans its five confirmed RendererRing allocations, and Wolfenstein scans its segmented one-megabyte command ring
 - automatic GUI capture tuning; budget, recent-history size, sample/delay, and maximum-texture controls remain CLI diagnostics
-- optional orientation diagnostic previews; normal BMP output uses the user-confirmed Flip-Y orientation
+- profile-aware default orientation: user-confirmed Flip-Y for SOCOM 4/MAG and neutral for Wolfenstein, with optional diagnostic variants
 - a live capture log
 
 ### Hidden CLI worker architecture
@@ -237,7 +237,7 @@ no zlib dependency.
 --max N                   Maximum unique dumps (default: 2000)
 --auto-tune               Choose safe capture limits/retry timing automatically
 --dump                    Write raw payloads; supported BC formats also get BMP previews
---preview-variants        Also emit neutral/Flip-X/Flip-XY BMP diagnostics (Flip-Y is default)
+--preview-variants        Also emit the three non-default BMP orientations
 --budget-mb N             Total payload write budget (default: 1024 MB)
 --fifo-scan               Find moving CellGcmControl/context state (recommended next SOCOM 4 test)
 --fifo-capture            Snapshot the active primary GET-to-PUT FIFO window
