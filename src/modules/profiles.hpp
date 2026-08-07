@@ -43,10 +43,12 @@ struct GameProfile
     DeepCaptureKind deep_capture = DeepCaptureKind::none;
     std::array<CommandBufferRange, 6> deep_buffers{};
     std::size_t deep_buffer_count = 0;
+    bool preview_flip_y = true;
 };
 
 std::span<const GameProfile> all();
 const GameProfile& default_profile();
 const GameProfile* find(std::wstring_view name);
+bool default_preview_flip_y(std::wstring_view name);
 std::wstring dump_folder_name(const GameProfile& profile);
 }

@@ -16,6 +16,7 @@ Current built-in profiles are **SOCOM 4: U.S. Navy SEALs — BCUS98135 v01.00**,
   previews, options, and GUI code are separated into focused modules.
 - Automatic capture tuning in the GUI; no budget/history/sample/delay/max values to guess.
 - Deep texture capture is profile-aware: SOCOM 4 follows its confirmed secondary RSX command buffers, while MAG scans all five TTY-confirmed RendererRing command-buffer ranges in one capture instead of waiting for GET/PUT to visit them.
+- Preview orientation is profile-aware: SOCOM 4 and MAG retain Flip-Y output, while Wolfenstein defaults to neutral orientation.
 - Dumps BC1/DXT1, BC2/DXT23 and BC3/DXT45 textures to viewable `.bmp` files.
 - Respects RSX row pitch for linear BC textures such as `A6/A7/A8`, using packet-aware `CONTROL3` state tracking to avoid padded-row preview corruption.
 - SOCOM 4 textures are automatically Flip-Y corrected for normal viewing.

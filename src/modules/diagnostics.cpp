@@ -1,6 +1,7 @@
 #include "diagnostics.hpp"
 
 #include "process_memory.hpp"
+#include "profiles.hpp"
 #include "rsx_texture.hpp"
 
 #include <algorithm>
@@ -479,7 +480,9 @@ int scan_rsx_texture_commands(HANDLE process, std::uintptr_t vm_base, const Opti
                     const std::uint64_t remaining = opt.dump_budget_bytes - std::min(opt.dump_budget_bytes, dumped_bytes);
                     if (!opt.list_only && r->estimated_size <= remaining)
                     {
-                        dumped = dump_rsx_payload(process, vm_base, *r, opt.out_dir, idx, opt.preview_variants);
+                        dumped = dump_rsx_payload(process, vm_base, *r, opt.out_dir, idx,
+                                                  opt.preview_variants,
+                                                  profiles::default_preview_flip_y(opt.profile));
                         if (dumped) { ++dumped_count; dumped_bytes += r->estimated_size; }
                     }
 

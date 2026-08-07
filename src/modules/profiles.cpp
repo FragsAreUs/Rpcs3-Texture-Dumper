@@ -36,6 +36,7 @@ constexpr std::array<GameProfile, 3> kProfiles = {{
           {0x021EC780u, 0x021F4780u},
           {0x021F4800u, 0x021FC800u}}},
         6,
+        true,
     },
     {
         L"BCUS98110",
@@ -56,6 +57,7 @@ constexpr std::array<GameProfile, 3> kProfiles = {{
           {0x00197000u, 0x00200000u},
           {0u, 0u}}},
         5,
+        true,
     },
     {
         L"BLES00564-BLUS30298",
@@ -76,6 +78,7 @@ constexpr std::array<GameProfile, 3> kProfiles = {{
           {0u, 0u},
           {0u, 0u}}},
         1,
+        false,
     },
 }};
 }
@@ -101,6 +104,12 @@ const GameProfile* find(std::wstring_view name)
         }
     }
     return nullptr;
+}
+
+bool default_preview_flip_y(std::wstring_view name)
+{
+    const auto* profile = find(name);
+    return !profile || profile->preview_flip_y;
 }
 
 std::wstring dump_folder_name(const GameProfile& profile)

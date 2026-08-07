@@ -175,7 +175,9 @@ static int capture_renderer_ring(HANDLE process, std::uintptr_t vm_base, const O
             const std::uint64_t remaining = opt.dump_budget_bytes - std::min(opt.dump_budget_bytes, dumped_bytes);
             if (!opt.list_only && r->estimated_size <= remaining)
             {
-                dumped = dump_rsx_payload(process, vm_base, *r, opt.out_dir, idx, opt.preview_variants);
+                dumped = dump_rsx_payload(process, vm_base, *r, opt.out_dir, idx,
+                                          opt.preview_variants,
+                                          profiles::default_preview_flip_y(opt.profile));
                 if (dumped)
                 {
                     ++dumped_count;
@@ -757,7 +759,9 @@ static int capture_active_fifo(HANDLE process, std::uintptr_t vm_base, const Opt
                 const std::uint64_t remaining = opt.dump_budget_bytes - std::min(opt.dump_budget_bytes, called_dumped_bytes);
                 if (!opt.list_only && r->estimated_size <= remaining)
                 {
-                    dumped = dump_rsx_payload(process, vm_base, *r, opt.out_dir, idx, opt.preview_variants);
+                    dumped = dump_rsx_payload(process, vm_base, *r, opt.out_dir, idx,
+                                              opt.preview_variants,
+                                              profiles::default_preview_flip_y(opt.profile));
                     if (dumped) { ++called_dumped_count; called_dumped_bytes += r->estimated_size; }
                 }
 
@@ -867,7 +871,9 @@ static int capture_active_fifo(HANDLE process, std::uintptr_t vm_base, const Opt
         const std::uint64_t remaining = opt.dump_budget_bytes - std::min(opt.dump_budget_bytes, dumped_bytes);
         if (!opt.list_only && r->estimated_size <= remaining)
         {
-            dumped = dump_rsx_payload(process, vm_base, *r, opt.out_dir, idx, opt.preview_variants);
+            dumped = dump_rsx_payload(process, vm_base, *r, opt.out_dir, idx,
+                                      opt.preview_variants,
+                                      profiles::default_preview_flip_y(opt.profile));
             if (dumped) { ++dumped_count; dumped_bytes += r->estimated_size; }
         }
 
@@ -996,7 +1002,9 @@ int capture_engine::run(
                         bool dumped = false;
                         if (!opt.list_only && t->estimated_size <= opt.dump_budget_bytes - std::min(opt.dump_budget_bytes, dumped_bytes))
                         {
-                            dumped = dump_payload(process, vm_base, *t, opt.out_dir, idx, opt.preview_variants);
+                            dumped = dump_payload(process, vm_base, *t, opt.out_dir, idx,
+                                                  opt.preview_variants,
+                                                  profiles::default_preview_flip_y(opt.profile));
                             if (dumped)
                             {
                                 ++dumped_count;

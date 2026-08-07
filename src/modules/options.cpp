@@ -68,7 +68,7 @@ void usage()
         L"  --vm-base HEX        Override detected host vm::g_base_addr\n"
         L"  --max N              Maximum unique candidates (default 2000)\n"
         L"  --dump               Write raw payloads (default is manifest-only)\n"
-        L"  --preview-variants   Also emit neutral/Flip-X/Flip-XY BMP diagnostics (Flip-Y is default)\n"
+        L"  --preview-variants   Also emit the three non-default BMP orientations\n"
         L"  --budget-mb N        Maximum payload bytes written (default 1024 MB)\n"
         L"  --rsx-scan           Scan mapped RSX memory for FIFO texture packet history\n"
         L"  --fifo-scan          Find moving CellGcmControl/context state (live FIFO diagnostic)\n"
